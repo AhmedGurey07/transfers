@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f6f2">
+  <title>SHAAFICI — Order Desk</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="products.js" defer></script>
+  <script src="vendor/pdfjs/pdf.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="SHAAFICI Order Desk home">
+        <img class="brand-logo" src="shaafici-warehouse-200-logo.png" alt="SHAAFICI Warehouse 200">
+      </a>
+
+      <div class="nav-label">WORKSPACE</div>
+      <nav class="navigation" aria-label="Main navigation">
+        <a class="nav-link active" href="#overview" data-view="overview"><span class="nav-icon">⌂</span> Overview</a>
+        <a class="nav-link" href="#orders" data-view="orders"><span class="nav-icon">▤</span> All orders <span class="nav-count" id="nav-order-count">0</span></a>
+        <a class="nav-link" href="#history" data-view="history"><span class="nav-icon">◷</span> Order history</a>
+        <a class="nav-link" href="#new-order" data-view="new-order"><span class="nav-icon">＋</span> Create an order</a>
+      </nav>
+
+      <div class="nav-label category-label">ORDER FORMS</div>
+      <nav class="navigation category-nav" aria-label="Order form categories">
+        <button class="nav-link category-link" type="button" data-category="Tiles & marble"><span class="category-dot dot-stone"></span> Tiles &amp; marble</button>
+        <button class="nav-link category-link" type="button" data-category="Doors & mirrors"><span class="category-dot dot-wood"></span> Doors &amp; mirrors</button>
+        <button class="nav-link category-link" type="button" data-category="Plumbing"><span class="category-dot dot-water"></span> Plumbing</button>
+        <button class="nav-link category-link" type="button" data-category="Electrical & decoration"><span class="category-dot dot-electric"></span> Electrical &amp; decoration</button>
+        <button class="nav-link category-link" type="button" data-category="Gypsum & boards"><span class="category-dot dot-board"></span> Gypsum &amp; boards</button>
+        <button class="nav-link category-link" type="button" data-category="Shower glass"><span class="category-dot dot-glass"></span> Shower glass</button>
+        <button class="nav-link category-link" type="button" data-category="Lighting & cables"><span class="category-dot dot-light"></span> Lighting &amp; cables</button>
+        <button class="nav-link category-link" type="button" data-category="General order"><span class="category-dot dot-general"></span> General order</button>
+        <button class="nav-link category-link" type="button" data-category="Converter"><span class="category-dot dot-converter"></span> Converter</button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="sidebar-note"><span class="online-dot"></span><span><strong>All caught up</strong><small>Your orders are saved on this device.</small></span></div>
+        <div class="sidebar-footer">A simpler way to keep business moving.</div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="breadcrumb"><span>Workspace</span><span class="crumb-slash">/</span><strong id="breadcrumb-current">Overview</strong></div>
+        <div class="topbar-actions"><span class="today-label" id="today-label"></span><button class="avatar" type="button" aria-label="Signed in as Ahmed Gurey">AG</button></div>
+      </header>
+
+      <section class="view active" id="overview-view" aria-labelledby="welcome-title">
+        <div class="welcome-row">
+          <div><p class="eyebrow">YOUR BUSINESS AT A GLANCE</p><h1 id="welcome-title">Good day, Ahmed <span class="wave">✳</span></h1><p class="welcome-copy">Keep every order organized, from the first item to the final delivery.</p></div>
+          <div class="overview-actions">
+            <button class="button button-secondary" type="button" id="upload-order-pdf">Upload order PDF</button>
+            <button class="button button-primary" type="button" data-action="new-order"><span class="button-plus">＋</span> Create new order</button>
+            <input id="order-pdf-file" type="file" accept=".pdf,application/pdf" hidden>
+            <p class="pdf-import-hint">Upload this website's orders or text-based delivery slips. Scanned PDFs are not supported.</p>
+            <p id="pdf-import-status" class="pdf-import-status" role="status" aria-live="polite" hidden></p>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">TOTAL ORDERS</span><span class="stat-icon icon-lilac">▤</span></div><div class="stat-number" id="stat-total">0</div><div class="stat-foot"><span class="stat-foot-label">Saved on this device</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">OPEN ORDERS</span><span class="stat-icon icon-amber">◷</span></div><div class="stat-number" id="stat-open">0</div><div class="stat-foot"><span class="mini-dot amber-dot"></span><span class="stat-foot-label">Awaiting fulfilment</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">COMPLETED</span><span class="stat-icon icon-green">✓</span></div><div class="stat-number" id="stat-completed">0</div><div class="stat-foot"><span class="mini-dot green-dot"></span><span class="stat-foot-label">Delivered or collected</span></div></article>
+        </div>
+
+        <div class="section-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>Recent orders</h2></div><button class="text-button" type="button" data-action="all-orders">View all orders <span>→</span></button></div>
+        <div class="table-card">
+          <div class="table-scroll"><table><thead><tr><th>ORDER</th><th>CUSTOMER</th><th>TRANSFER ID</th><th>DATE</th><th>STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="recent-orders"></tbody></table></div>
+          <div class="empty-state" id="recent-empty"><span class="empty-icon">▤</span><strong>No orders yet</strong><span>Your saved orders will show up here.</span><button class="button button-secondary" type="button" data-action="new-order">Create your first order</button></div>
+        </div>
+
+        <div class="section-heading forms-heading"><div><p class="eyebrow">MADE FOR YOUR BUSINESS</p><h2>Start with a form</h2></div></div>
+        <div class="form-shortcuts">
+          <button class="shortcut-card" type="button" data-category="Tiles & marble"><span class="shortcut-icon shortcut-stone">▧</span><span><strong>Tiles &amp; marble</strong><small>Marble, tiles &amp; samples</small></span><span class="shortcut-arrow">↗</span></button>
+          <button class="shortcut-card" type="button" data-category="Doors & mirrors"><span class="shortcut-icon shortcut-wood">▥</span><span><strong>Doors &amp; mirrors</strong><small>Doors, handles &amp; mirrors</small></span><span class="shortcut-arrow">↗</span></button>
+          <button class="shortcut-card" type="button" data-category="Plumbing"><span class="shortcut-icon shortcut-water">⌁</span><span><strong>Plumbing</strong><small>Fittings &amp; accessories</small></span><span class="shortcut-arrow">↗</span></button>
+          <button class="shortcut-card" type="button" data-category="Electrical & decoration"><span class="shortcut-icon shortcut-electric">✳</span><span><strong>Electrical &amp; decoration</strong><small>Lighting &amp; finishing</small></span><span class="shortcut-arrow">↗</span></button>
+          <button class="shortcut-card" type="button" data-category="Converter"><span class="shortcut-icon shortcut-converter">↔</span><span><strong>Converter</strong><small>Tiles &amp; gypsum calculator</small></span><span class="shortcut-arrow">↗</span></button>
+        </div>
+      </section>
+
+      <section class="view" id="orders-view" aria-labelledby="orders-title">
+        <div class="page-heading"><div><p class="eyebrow">YOUR BUSINESS RECORDS</p><h1 id="orders-title">All orders</h1><p class="welcome-copy">Review, update, and print your saved orders.</p></div><button class="button button-primary" type="button" data-action="new-order"><span class="button-plus">＋</span> Create new order</button></div>
+        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search customer or order number" aria-label="Search orders"></label><label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Open">Open</option><option value="In progress">In progress</option><option value="Completed">Completed</option></select></label></div>
+        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>ORDER</th><th>CUSTOMER</th><th>TRANSFER ID</th><th>DATE</th><th>STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="all-orders"></tbody></table></div><div class="empty-state" id="orders-empty"><span class="empty-icon">⌕</span><strong>No matching orders</strong><span>Try changing your search or create a new order.</span></div></div>
+      </section>
+
+      <section class="view" id="history-view" aria-labelledby="history-title">
+        <div class="page-heading"><div><p class="eyebrow">ORDER AUDIT TRAIL</p><h1 id="history-title">Order history</h1><p class="welcome-copy">Review order creation, edits, status changes, and deletions.</p></div><button class="button button-secondary" type="button" id="history-show-all">Show all history</button></div>
+        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="history-search" type="search" placeholder="Search order, customer, or activity" aria-label="Search order history"></label><span id="history-filter-label" class="history-filter-label"></span></div>
+        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>WHEN</th><th>ORDER</th><th>CUSTOMER</th><th>ACTIVITY</th></tr></thead><tbody id="order-history"></tbody></table></div><div class="empty-state" id="history-empty"><span class="empty-icon">◷</span><strong>No history yet</strong><span>Order activity will appear here.</span></div></div>
+      </section>
+
+      <section class="view" id="new-order-view" aria-labelledby="order-form-title">
+        <div class="page-heading form-page-heading"><div><p class="eyebrow">ORDER BUILDER <span class="heading-dot">·</span> <span id="order-id-label">NEW ORDER</span></p><h1 id="order-form-title">Create an order</h1><p class="welcome-copy">Fill in the details below, then preview and print your order.</p></div><button class="button button-quiet" type="button" data-action="cancel-order">← Back to overview</button></div>
+        <form id="order-form">
+          <div class="builder-layout">
+            <div class="builder-main">
+              <article class="panel">
+                <div class="panel-heading"><div><span class="step-number">01</span><div><h2>Order details</h2><p>Who is this order for?</p></div></div><span class="panel-required">* Required</span></div>
+                <div class="field-grid">
+                  <label class="field field-wide"><span>Customer / company <i>*</i></span><input name="customer" required maxlength="100" placeholder="e.g. Ansax Construction Co"></label>
+                  <label class="field"><span>Branch</span><input name="branch" maxlength="80" placeholder="Branch name"></label>
+                  <input name="category" id="category-select" type="hidden" value="Tiles &amp; marble">
+                  <label class="field"><span>Transfer ID</span><input name="transferId" maxlength="50" placeholder="e.g. JJY/INT/10024"></label>
+                  <label class="field"><span>Order date <i>*</i></span><input name="date" id="order-date" type="date" required></label>
+                  <div class="field"><label for="order-driver">Delivered by</label><input name="driver" id="order-driver" list="saved-drivers" maxlength="80" placeholder="Enter or select a driver"><label for="driver-phone">Phone number</label><input name="driverPhone" id="driver-phone" type="tel" maxlength="30" placeholder="Driver phone number"></div>
+                  <details class="field-wide drivers-manager">
+                    <summary>Drivers</summary>
+                    <p>Save driver names and phone numbers for quick use in future orders.</p>
+                    <div class="drivers-manager-fields">
+                      <label class="field"><span>Driver name</span><input id="saved-driver-name" maxlength="80" placeholder="e.g. Ahmed Gurey"></label>
+                      <label class="field"><span>Phone number</span><input id="saved-driver-phone" type="tel" maxlength="30" placeholder="e.g. 8888014"></label>
+                    </div>
+                    <div class="drivers-manager-actions"><button class="button button-secondary" type="button" id="save-driver">Save driver</button><span id="drivers-status" role="status" aria-live="polite"></span></div>
+                  </details>
+                  <label class="field"><span>Created by</span><select name="preparedBy"><option value="Eng Ahmed Gurey">Eng Ahmed Gurey</option><option value="Hamze Ali">Hamze Ali</option></select></label>
+                  <label class="field field-wide"><span>Notes</span><textarea name="notes" rows="2" maxlength="250" placeholder="Add delivery instructions or other details"></textarea></label>
+                </div>
+              </article>
+
+              <article class="panel converter-panel" id="converter-panel" hidden>
+                <div class="panel-heading"><div><span class="step-number">↔</span><div><h2>Area converter</h2><p>Enter square meters to calculate the matching product units.</p></div></div></div>
+                <div class="converter-controls">
+                  <label class="field"><span>Calculator <i>*</i></span><select id="converter-mode">
+                    <option value="tile-40-normal">40 × 40 — Normal</option>
+                    <option value="tile-40-outdoor">40 × 40 — Outdoor</option>
+                    <option value="tile-40-new">40 × 40 — New</option>
+                    <option value="tile-30-30">30 × 30</option>
+                    <option value="tile-30-45">30 × 45 — Normal</option>
+                    <option value="tile-30-45-88">30 × 45 — 88 CRT</option>
+                    <option value="tile-30-60-marble">30 × 60 — Marble</option>
+                    <option value="tile-30-60-other">30 × 60 — Other</option>
+                    <option value="tile-60-60-porcelain">60 × 60 — Porcelain</option>
+                    <option value="tile-60-60-ceramic">60 × 60 — Ceramic</option>
+                    <option value="tile-60-60-thick">60 × 60 — High thickness</option>
+                    <option value="tile-60-60-outdoor">60 × 60 — Outdoor</option>
+                    <option value="tile-60-120-large">60 × 120 — Large</option>
+                    <option value="tile-60-120-small">60 × 120 — Small</option>
+                    <option value="tile-20-120">20 × 120</option>
+                    <option value="tile-37-25">37 × 25</option>
+                    <option value="gypsum-caag">Gypsum — Caag</option>
+                    <option value="gypsum-saafi">Gypsum — Saafi</option>
+                  </select></label>
+                  <label class="field"><span>Area (m²) <i>*</i></span><input id="converter-area" type="number" min="0.01" step="any" placeholder="Enter meters"></label>
+                </div>
+                <div class="converter-results" id="converter-results" aria-live="polite">
+                  <div class="converter-empty">Enter an area to see the converted quantities.</div>
+                </div>
+                <button class="button button-secondary converter-add" type="button" id="add-conversion" disabled>Add converted items to order</button>
+              </article>
+
+              <article class="panel items-panel">
+                <div class="panel-heading"><div><span class="step-number">02</span><div><h2>Order items</h2><p>Choose from <span id="catalog-count"></span> warehouse products or type a custom item.</p></div></div><button class="button button-secondary converter-toggle" id="toggle-converter" type="button" aria-expanded="false">Use area converter</button><span class="item-count" id="item-count">0 items</span></div>
+                <div class="items-table-wrap"><table class="items-table"><thead><tr><th class="item-number-col">#</th><th colspan="2">PRODUCT / DESCRIPTION (QUANTITIES &amp; UNITS BELOW)</th><th></th></tr></thead><tbody id="items-body"></tbody></table></div>
+                <button class="add-item-button" type="button" id="add-item"><span>＋</span> Add an item</button>
+              </article>
+              <div class="form-actions"><span class="save-hint"><span class="save-check">✓</span> Your order is saved in this browser.</span><div><button class="button button-quiet" type="button" id="print-order">Preview</button><button class="button button-secondary" type="button" data-action="cancel-order">Cancel</button><button class="button button-primary" type="submit"><span class="button-plus">✓</span> Save order</button></div></div>
+            </div>
+            <aside class="builder-aside">
+              <article class="preview-card">
+                <div class="preview-top"><div><span class="preview-label">LIVE PREVIEW</span><h2>Order form</h2></div></div>
+                <div class="preview-divider"></div>
+                <div class="preview-business"><img class="preview-logo" src="shaafici-warehouse-200-logo.png" alt="SHAAFICI Warehouse 200"></div>
+                <div class="preview-order-meta"><div><span>ORDER NO.</span><strong id="preview-id">AG-NEW</strong></div><div><span>DATE</span><strong id="preview-date">—</strong></div></div>
+                <div class="preview-customer"><span>CUSTOMER</span><strong id="preview-customer">Customer name</strong><small id="preview-transfer-id">Transfer ID: —</small></div>
+                <div class="preview-contact"><div><span>BRANCH</span><strong id="preview-branch">—</strong></div><div><span>DELIVERED BY</span><strong id="preview-driver">—</strong><small id="preview-driver-phone"></small></div></div>
+                <div class="preview-items" id="preview-items"><div class="preview-empty">Your items will appear here.</div></div>
+                <div class="preview-notes" id="preview-notes"></div>
+                <div class="preview-created-by"><span>CREATED BY</span><strong id="preview-created-by">Ahmed Gurey</strong></div>
+              </article>
+              <div class="tip-card"><span class="tip-icon">✦</span><div><strong>Quick tip</strong><p>Preview your order first, then choose Print now when it looks right.</p></div></div>
+            </aside>
+          </div>
+        </form>
+      </section>
+
+      <section class="view print-preview-view" id="print-preview-view" aria-labelledby="print-preview-title">
+        <div class="page-heading print-preview-heading">
+          <div><p class="eyebrow">ORDER READY</p><h1 id="print-preview-title">Review your order</h1><p class="welcome-copy" id="print-layout-help">Choose the Epson receipt or HP full-page layout to preview and print. Select the matching printer in the print dialog.</p></div>
+          <div class="print-preview-actions"><button class="button button-secondary" type="button" id="back-from-preview">← <span id="preview-back-label">Back to order</span></button><button class="button button-secondary" type="button" id="preview-receipt">Epson receipt preview</button><button class="button button-secondary" type="button" id="preview-full-page">HP full-page preview</button><button class="button button-primary" type="button" id="print-order-now">Print this layout</button><a class="button button-secondary" id="open-pdf" target="_blank" rel="noopener" hidden>Open PDF to print</a><button class="button button-secondary" type="button" id="download-pdf">Download PDF again</button></div>
+        </div>
+        <article class="print-sheet">
+          <button class="button button-secondary receipt-screenshot-button" type="button" id="take-receipt-screenshot">Take a screenshot</button>
+          <header class="print-sheet-header">
+            <div class="print-sheet-brand"><img class="print-sheet-logo" src="shaafici-warehouse-200-logo.png" alt="SHAAFICI Warehouse 200"></div>
+            <div class="print-sheet-title"><span>ORDER FORM</span><strong id="paper-order-id">AG-NEW</strong></div>
+          </header>
+          <div class="print-sheet-rule"></div>
+          <div class="print-sheet-meta">
+            <div><span>CUSTOMER / COMPANY</span><strong id="paper-customer">—</strong></div>
+            <div><span>ORDER DATE</span><strong id="paper-date">—</strong></div>
+            <div><span>BRANCH</span><strong id="paper-branch">—</strong></div>
+            <div><span>DELIVERED BY</span><strong id="paper-driver">—</strong></div>
+            <div id="paper-transfer-id-field"><span>TRANSFER ID</span><strong id="paper-transfer-id">—</strong></div>
+            <div id="paper-driver-phone-field"><span>DRIVER PHONE</span><strong id="paper-driver-phone">—</strong></div>
+          </div>
+          <table class="print-items-table">
+            <colgroup><col class="print-item-number-column"><col class="print-item-product-column"><col class="print-item-quantity-column"></colgroup>
+            <thead><tr><th>#</th><th>PRODUCT / DESCRIPTION</th><th></th></tr></thead>
+            <tbody id="paper-items"></tbody>
+          </table>
+          <div class="print-sheet-notes" id="paper-notes"></div>
+          <div class="print-sheet-created-by" id="paper-created-by-field"><span>CREATED BY</span><strong id="paper-created-by">—</strong></div>
+        </article>
+      </section>
+
+      <footer class="main-footer"><span>SHAAFICI <span class="footer-dot">·</span> ORDER DESK</span><span>Orders stay private on this device.</span><span id="sync-status" class="sync-status" role="status" aria-live="polite"></span></footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <datalist id="product-catalog"></datalist>
+  <datalist id="saved-drivers"></datalist>
+</body>
+</html>

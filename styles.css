@@ -30,6 +30,7 @@ button { cursor: pointer; }
 .auth-submit { width: 100%; margin-top: 6px; }
 .auth-status { min-height: 16px; margin: 13px 0 0; color: var(--muted); font-size: 10px; text-align: center; line-height: 1.5; }
 .auth-status.error { color: #a53e35; }
+.auth-signup-note { margin: 16px 0 0; }
 .sign-out-button { min-height: 30px; padding: 0 10px; font-size: 9px; }
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; height: 100vh; background: #fff; border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 27px 16px 18px; z-index: 4; }
@@ -62,7 +63,8 @@ button { cursor: pointer; }
 .crumb-slash { color: #c5cbc3; }
 .topbar-actions { display: flex; gap: 15px; align-items: center; }
 .today-label { color: #798378; font-size: 11px; }
-.avatar { width: 30px; height: 30px; border: 1px solid #dfe7df; border-radius: 50%; color: var(--green); background: #eef5ed; font-size: 10px; font-weight: 700; }
+.avatar { position: relative; overflow: hidden; width: 30px; height: 30px; padding: 0; border: 1px solid #dfe7df; border-radius: 50%; color: var(--green); background: #eef5ed; font-size: 10px; font-weight: 700; }
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .view { display: none; padding-top: 32px; animation: appear .18s ease; }
 .view.active { display: block; }
 @keyframes appear { from { opacity: .7; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
@@ -381,6 +383,8 @@ table { border-collapse: collapse; width: 100%; text-align: left; }
 .users-list-panel table { min-width: 620px; }
 .user-row-actions { display: flex; gap: 5px; }
 .user-row-actions .button { min-height: 28px; padding: 0 8px; font-size: 9px; }
+.profile-panel { max-width: 560px; }
+.profile-avatar-preview { width: 76px; height: 76px; margin: 0 0 12px; border: 1px solid var(--line); border-radius: 50%; object-fit: cover; }
 @media (max-width: 820px) { .users-layout { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .navigation { grid-template-columns: repeat(4,minmax(0,1fr)); } .navigation .nav-link[data-view="users"]:not([hidden]) { display: flex; } }
 @media print {

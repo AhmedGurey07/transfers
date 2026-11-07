@@ -94,6 +94,10 @@
   let cloudChannel = null;
   let cloudActivationPromise = null;
   let cloudRefreshTimer = null;
+  let invitationSetupPending = new URLSearchParams(location.hash.slice(1)).get("type") === "invite"
+    || new URLSearchParams(location.search).get("type") === "invite";
+  let invitedSignupUser = null;
+  let profilePreviewUrl = "";
   function indexProductCatalog() {
     productsByName.clear();
     productsByPdfName.clear();
@@ -229,7 +233,177 @@
   function showAuthGate(message, isError = false) {
     $("#app-shell").hidden = true;
     $("#auth-gate").hidden = false;
+    $("#auth-form").hidden = false;
+    $("#invite-signup-form").hidden = true;
     setAuthStatus(message, isError);
+  }
+
+  function setInviteSignupStatus(message, isError = false) {
+    const status = $("#invite-signup-status");
+    status.textContent = message;
+    status.classList.toggle("error", isError);
+  }
+
+  function showInvitationSignup(user) {
+    invitedSignupUser = user;
+    $("#app-shell").hidden = true;
+    $("#auth-gate").hidden = false;
+    $("#auth-form").hidden = true;
+    $("#invite-signup-form").hidden = false;
+    $("#invite-email").value = user.email || "";
+    $("#invite-username").value = typeof user.user_metadata?.display_name === "string"
+      ? user.user_metadata.display_name
+      : "";
+    setInviteSignupStatus("");
+  }
+
+  function validateAvatarFile(file) {
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      throw new Error("Choose a PNG, JPEG, or WebP image.");
+    }
+    if (file.size > 2 * 1024 * 1024) throw new Error("The profile image must be 2 MB or smaller.");
+  }
+
+  async function uploadProfileAvatar(file, userId) {
+    validateAvatarFile(file);
+    if (!file) return null;
+    const extension = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[file.type];
+    const path = `${userId}/avatar.${extension}`;
+    const { error } = await supabaseClient.storage.from("profile-photos").upload(path, file, {
+      cacheControl: "3600",
+      contentType: file.type,
+      upsert: true
+    });
+    if (error) throw error;
+    return path;
+  }
+
+  function getProfileAvatarUrl(user) {
+    const path = user?.user_metadata?.avatar_path;
+    if (typeof path !== "string" || !path) return "";
+    return supabaseClient.storage.from("profile-photos").getPublicUrl(path).data.publicUrl;
+  }
+
+  function renderAccountAvatar(user) {
+    const name = String(user?.user_metadata?.display_name || user?.email || "AG").trim();
+    const initials = name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "AG";
+    $("#account-avatar-initials").textContent = initials;
+    const image = $("#account-avatar-image");
+    const url = getProfileAvatarUrl(user);
+    image.hidden = !url;
+    if (url) image.src = url;
+    else image.removeAttribute("src");
+  }
+
+  function resetProfilePreview() {
+    if (profilePreviewUrl) URL.revokeObjectURL(profilePreviewUrl);
+    profilePreviewUrl = "";
+    const preview = $("#profile-avatar-preview");
+    const url = getProfileAvatarUrl(cloudUser);
+    preview.hidden = !url;
+    if (url) preview.src = url;
+    else preview.removeAttribute("src");
+  }
+
+  function prepareProfileForm() {
+    $("#profile-username").value = String(cloudUser?.user_metadata?.display_name || "");
+    $("#profile-avatar-file").value = "";
+    $("#profile-password").value = "";
+    $("#profile-password-confirm").value = "";
+    resetProfilePreview();
+    $("#profile-status").textContent = "";
+    $("#profile-status").classList.remove("error");
+  }
+
+  async function finishInvitedSignup(event) {
+    event.preventDefault();
+    const submit = $("#invite-signup-submit");
+    const name = $("#invite-username").value.trim();
+    const password = $("#invite-password").value;
+    const confirmation = $("#invite-password-confirm").value;
+    const file = $("#invite-avatar-file").files[0];
+    if (!invitationSetupPending || !invitedSignupUser) {
+      setInviteSignupStatus("Signups are invite-only. Ask a workspace admin to send you an invitation.", true);
+      return;
+    }
+    if (!name || name.length > 120) {
+      setInviteSignupStatus("Enter a username up to 120 characters.", true);
+      return;
+    }
+    if (password.length < 8 || password !== confirmation) {
+      setInviteSignupStatus(password !== confirmation ? "The passwords do not match." : "Use a password with at least 8 characters.", true);
+      return;
+    }
+    submit.disabled = true;
+    setInviteSignupStatus("Creating your account…");
+    try {
+      const avatarPath = await uploadProfileAvatar(file, invitedSignupUser.id);
+      const metadata = { ...invitedSignupUser.user_metadata, display_name: name };
+      if (avatarPath) metadata.avatar_path = avatarPath;
+      const { data, error } = await supabaseClient.auth.updateUser({ password, data: metadata });
+      if (error) throw error;
+      if (!data.user) throw new Error("Supabase did not return your updated account.");
+      invitationSetupPending = false;
+      invitedSignupUser = null;
+      history.replaceState(null, "", `${location.pathname}${location.search}`);
+      $("#invite-signup-form").reset();
+      await activateCloudSession(data.user);
+    } catch (error) {
+      console.error("Could not complete the invited signup.", error);
+      setInviteSignupStatus(error.message || "Could not complete signup.", true);
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
+  async function saveOwnProfile(event) {
+    event.preventDefault();
+    if (!cloudUser) return;
+    const submit = $("#save-profile");
+    const name = $("#profile-username").value.trim();
+    const password = $("#profile-password").value;
+    const confirmation = $("#profile-password-confirm").value;
+    const file = $("#profile-avatar-file").files[0];
+    const status = $("#profile-status");
+    if (!name || name.length > 120) {
+      status.textContent = "Enter a username up to 120 characters.";
+      status.classList.add("error");
+      return;
+    }
+    if (password && password.length < 8) {
+      status.textContent = "Use a password with at least 8 characters.";
+      status.classList.add("error");
+      return;
+    }
+    if (password !== confirmation) {
+      status.textContent = "The passwords do not match.";
+      status.classList.add("error");
+      return;
+    }
+    submit.disabled = true;
+    status.textContent = "Saving your profile…";
+    status.classList.remove("error");
+    try {
+      const avatarPath = await uploadProfileAvatar(file, cloudUser.id);
+      const metadata = { ...cloudUser.user_metadata, display_name: name };
+      if (avatarPath) metadata.avatar_path = avatarPath;
+      const update = { data: metadata };
+      if (password) update.password = password;
+      const { data, error } = await supabaseClient.auth.updateUser(update);
+      if (error) throw error;
+      if (!data.user) throw new Error("Supabase did not return your updated profile.");
+      cloudUser = data.user;
+      renderAccountAvatar(cloudUser);
+      prepareProfileForm();
+      status.textContent = "Profile saved.";
+    } catch (error) {
+      console.error("Could not save your profile.", error);
+      status.textContent = error.message || "Could not save your profile.";
+      status.classList.add("error");
+    } finally {
+      submit.disabled = false;
+    }
   }
 
   function disableAuthForm() {
@@ -660,12 +834,16 @@
     supabaseClient.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT") lockCloudApp();
       if (event === "SIGNED_IN" && session?.user) {
-        window.setTimeout(() => activateCloudSession(session.user), 0);
+        window.setTimeout(() => {
+          if (invitationSetupPending) showInvitationSignup(session.user);
+          else activateCloudSession(session.user);
+        }, 0);
       }
     });
     supabaseClient.auth.getSession().then(({ data, error }) => {
       if (error) throw error;
-      if (data.session?.user) activateCloudSession(data.session.user);
+      if (data.session?.user && invitationSetupPending) showInvitationSignup(data.session.user);
+      else if (data.session?.user) activateCloudSession(data.session.user);
       else showAuthGate("Sign in to load your shared online workspace.");
     }).catch((error) => {
       console.error("Could not check the online sign-in session.", error);
@@ -1299,14 +1477,16 @@
       showToast("Only workspace admins can manage users.");
       name = "overview";
     }
+    if (name === "profile" && (!cloudDeployment || !cloudUser)) name = "overview";
     $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${name}-view`));
     $$("[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === name));
-    const labels = { overview: "Overview", orders: "All orders", history: "Order history", users: "Users", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
+    const labels = { overview: "Overview", orders: "All orders", history: "Order history", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
     $("#breadcrumb-current").textContent = labels[name] || "Overview";
     if (name === "orders") renderAllOrders();
     if (name === "history") renderHistory();
     if (name === "overview") renderOverview();
     if (name === "users" && ["owner", "admin"].includes(cloudRole)) loadWorkspaceUsers();
+    if (name === "profile") prepareProfileForm();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -2493,6 +2673,28 @@
     if (event.target === $("#category-select")) updateConverterVisibility();
   });
   form.addEventListener("submit", saveOrder);
+  $("#invite-signup-form").addEventListener("submit", finishInvitedSignup);
+  $("#profile-form").addEventListener("submit", saveOwnProfile);
+  $("#profile-cancel").addEventListener("click", () => setView("overview"));
+  $("#account-avatar").addEventListener("click", () => setView("profile"));
+  $("#profile-avatar-file").addEventListener("change", (event) => {
+    const file = event.target.files[0];
+    const preview = $("#profile-avatar-preview");
+    try {
+      validateAvatarFile(file);
+      if (profilePreviewUrl) URL.revokeObjectURL(profilePreviewUrl);
+      profilePreviewUrl = file ? URL.createObjectURL(file) : "";
+      const url = profilePreviewUrl || getProfileAvatarUrl(cloudUser);
+      preview.hidden = !url;
+      if (url) preview.src = url;
+      else preview.removeAttribute("src");
+    } catch (error) {
+      event.target.value = "";
+      resetProfilePreview();
+      $("#profile-status").textContent = error.message;
+      $("#profile-status").classList.add("error");
+    }
+  });
   $("#auth-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const submit = $("#auth-submit");
@@ -2564,6 +2766,8 @@
     $("#auth-gate").hidden = true;
     $("#sign-out").hidden = !cloudDeployment;
     $("#users-nav-link").hidden = !cloudDeployment || !["owner", "admin"].includes(cloudRole);
+    $("#account-avatar").hidden = !cloudDeployment;
+    renderAccountAvatar(cloudUser);
     $("#export-data").hidden = cloudDeployment;
     $("#import-data").hidden = !cloudDeployment;
     $("#storage-description").textContent = cloudDeployment

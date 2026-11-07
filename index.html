@@ -73,10 +73,14 @@
           <div><p class="eyebrow">YOUR BUSINESS AT A GLANCE</p><h1 id="welcome-title">Good day, Ahmed <span class="wave">✳</span></h1><p class="welcome-copy">Keep every order organized, from the first item to the final delivery.</p></div>
           <div class="overview-actions">
             <button class="button button-secondary" type="button" id="upload-order-pdf">Upload order PDF</button>
+            <button class="button button-secondary" type="button" id="export-data" hidden>Export orders for online use</button>
+            <button class="button button-secondary" type="button" id="import-data" hidden>Import local backup</button>
             <button class="button button-primary" type="button" data-action="new-order"><span class="button-plus">＋</span> Create new order</button>
             <input id="order-pdf-file" type="file" accept=".pdf,application/pdf" hidden>
+            <input id="data-backup-file" type="file" accept=".json,application/json" hidden>
             <p class="pdf-import-hint">Upload this website's orders or text-based delivery slips. Scanned PDFs are not supported.</p>
             <p id="pdf-import-status" class="pdf-import-status" role="status" aria-live="polite" hidden></p>
+            <p id="data-backup-status" class="pdf-import-status" role="status" aria-live="polite" hidden></p>
           </div>
         </div>
 

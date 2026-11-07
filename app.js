@@ -296,6 +296,95 @@
     setSyncStatus("Online · orders and drivers sync across signed-in devices.");
   }
 
+  function exportLocalBackup() {
+    if (cloudDeployment) return;
+    const backup = {
+      format: "shaafici-order-desk-backup",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      orders,
+      drivers
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], {
+      type: "application/json"
+    }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `shaafici-order-desk-backup-${dateValue()}.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`${orders.length} ${orders.length === 1 ? "order" : "orders"} exported. Keep the backup file safe.`);
+  }
+
+  async function importOnlineBackup(file) {
+    const status = $("#data-backup-status");
+    status.hidden = false;
+    status.classList.remove("error");
+    try {
+      if (!cloudDeployment || !cloudUser) throw new Error("Sign in to the online workspace before importing a backup.");
+      if (file.size > 25 * 1024 * 1024) throw new Error("The backup file is larger than the 25 MB import limit.");
+      const backup = JSON.parse(await file.text());
+      if (!backup || backup.format !== "shaafici-order-desk-backup" || backup.version !== 1
+        || !Array.isArray(backup.orders) || !Array.isArray(backup.drivers)) {
+        throw new Error("This is not a supported Order Desk backup file.");
+      }
+      if (backup.orders.some((order) => !order || typeof order.id !== "string" || !order.id.trim()
+        || !Array.isArray(order.items))) {
+        throw new Error("The backup contains an invalid order.");
+      }
+      if (backup.drivers.some((driver) => !driver || typeof driver.name !== "string"
+        || typeof driver.phone !== "string" || !driver.name.trim() || !driver.phone.trim())) {
+        throw new Error("The backup contains an invalid saved driver.");
+      }
+      const importedOrders = loadOrders(backup.orders);
+      if (importedOrders.length !== backup.orders.length
+        || new Set(importedOrders.map((order) => order.id)).size !== importedOrders.length) {
+        throw new Error("The backup contains duplicate or unsupported orders.");
+      }
+      const existingOrderResult = await supabaseClient.from("orders").select("id");
+      if (existingOrderResult.error) throw existingOrderResult.error;
+      const existingOrderIds = new Set(existingOrderResult.data.map((row) => row.id));
+      const missingOrders = importedOrders.filter((order) => !existingOrderIds.has(order.id));
+      if (missingOrders.length) {
+        const { error } = await supabaseClient.from("orders").upsert(
+          missingOrders.map((order) => ({ id: order.id, data: order })),
+          { onConflict: "id" }
+        );
+        if (error) throw error;
+      }
+
+      const existingDriverResult = await supabaseClient.from("drivers").select("driver_key");
+      if (existingDriverResult.error) throw existingDriverResult.error;
+      const existingDriverKeys = new Set(existingDriverResult.data.map((row) => row.driver_key));
+      const knownDriverKeys = new Set();
+      const missingDrivers = loadDrivers(backup.drivers).filter((driver) => {
+        const key = driver.name.trim().toLocaleLowerCase();
+        if (existingDriverKeys.has(key) || knownDriverKeys.has(key)) return false;
+        knownDriverKeys.add(key);
+        return true;
+      });
+      if (missingDrivers.length) {
+        const { error } = await supabaseClient.from("drivers").upsert(
+          missingDrivers.map((driver) => ({
+            driver_key: driver.name.trim().toLocaleLowerCase(),
+            name: driver.name,
+            phone: driver.phone
+          })),
+          { onConflict: "driver_key" }
+        );
+        if (error) throw error;
+      }
+
+      await loadCloudData(false);
+      status.textContent = `Imported ${missingOrders.length} new ${missingOrders.length === 1 ? "order" : "orders"} and ${missingDrivers.length} saved ${missingDrivers.length === 1 ? "driver" : "drivers"}. Existing online records were kept.`;
+      showToast(`${missingOrders.length} new ${missingOrders.length === 1 ? "order" : "orders"} imported online.`);
+    } catch (error) {
+      console.error("Could not import the Order Desk backup.", error);
+      status.classList.add("error");
+      status.textContent = error.message || "Could not import this backup file.";
+    }
+  }
+
   function scheduleCloudRefresh() {
     clearTimeout(cloudRefreshTimer);
     cloudRefreshTimer = window.setTimeout(async () => {
@@ -2139,6 +2228,13 @@
     openNewOrder(button.dataset.category);
   }));
   $("#upload-order-pdf").addEventListener("click", () => $("#order-pdf-file").click());
+  $("#export-data").addEventListener("click", exportLocalBackup);
+  $("#import-data").addEventListener("click", () => $("#data-backup-file").click());
+  $("#data-backup-file").addEventListener("change", (event) => {
+    const file = event.target.files[0];
+    if (file) importOnlineBackup(file);
+    event.target.value = "";
+  });
   $("#save-driver").addEventListener("click", saveDriver);
   $("#order-driver").addEventListener("input", fillSavedDriverPhone);
   $("#order-driver").addEventListener("change", fillSavedDriverPhone);
@@ -2268,6 +2364,8 @@
     $("#app-shell").hidden = false;
     $("#auth-gate").hidden = true;
     $("#sign-out").hidden = !cloudDeployment;
+    $("#export-data").hidden = cloudDeployment;
+    $("#import-data").hidden = !cloudDeployment;
     $("#storage-description").textContent = cloudDeployment
       ? `Signed in as ${cloudUser?.email || "workspace member"}.`
       : "Your orders are saved on this device.";

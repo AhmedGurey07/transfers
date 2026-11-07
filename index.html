@@ -6,12 +6,30 @@
   <meta name="theme-color" content="#f5f6f2">
   <title>SHAAFICI — Order Desk</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
-  <div class="app-shell">
+  <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
+    <form class="auth-card" id="auth-form">
+      <img src="shaafici-warehouse-200-logo.png" alt="SHAAFICI Warehouse 200">
+      <p class="eyebrow">SHAAFICI · ORDER DESK</p>
+      <h1 id="auth-title">Sign in to your workspace</h1>
+      <p class="auth-copy">Your orders and saved drivers are stored securely online.</p>
+      <label class="auth-field">Email
+        <input id="auth-email" type="email" autocomplete="username" required>
+      </label>
+      <label class="auth-field">Password
+        <input id="auth-password" type="password" autocomplete="current-password" required>
+      </label>
+      <button class="button button-primary auth-submit" id="auth-submit" type="submit">Sign in</button>
+      <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+  <div class="app-shell" id="app-shell" hidden>
     <aside class="sidebar">
       <a class="brand" href="#" aria-label="SHAAFICI Order Desk home">
         <img class="brand-logo" src="shaafici-warehouse-200-logo.png" alt="SHAAFICI Warehouse 200">
@@ -47,7 +65,7 @@
     <main class="main-content">
       <header class="topbar">
         <div class="breadcrumb"><span>Workspace</span><span class="crumb-slash">/</span><strong id="breadcrumb-current">Overview</strong></div>
-        <div class="topbar-actions"><span class="today-label" id="today-label"></span><button class="avatar" type="button" aria-label="Signed in as Ahmed Gurey">AG</button></div>
+        <div class="topbar-actions"><span class="today-label" id="today-label"></span><button class="button button-secondary sign-out-button" id="sign-out" type="button">Sign out</button><button class="avatar" type="button" aria-label="Signed in to the order desk">AG</button></div>
       </header>
 
       <section class="view active" id="overview-view" aria-labelledby="welcome-title">
@@ -210,7 +228,7 @@
         </article>
       </section>
 
-      <footer class="main-footer"><span>SHAAFICI <span class="footer-dot">·</span> ORDER DESK</span><span>Orders stay private on this device.</span><span id="sync-status" class="sync-status" role="status" aria-live="polite"></span></footer>
+      <footer class="main-footer"><span>SHAAFICI <span class="footer-dot">·</span> ORDER DESK</span><span id="storage-description">Orders are saved securely online.</span><span id="sync-status" class="sync-status" role="status" aria-live="polite"></span></footer>
     </main>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

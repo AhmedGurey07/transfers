@@ -18,6 +18,19 @@
 body { margin: 0; background: var(--canvas); color: var(--ink); font-size: 13px; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
+[hidden] { display: none !important; }
+.auth-gate { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.auth-card { width: min(100%, 390px); padding: 30px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: var(--shadow); }
+.auth-card > img { display: block; width: 185px; max-width: 100%; margin: 0 auto 25px; }
+.auth-card .eyebrow { text-align: center; }
+.auth-card h1 { font-size: 21px; text-align: center; }
+.auth-copy { margin: 0 0 22px; color: var(--muted); font-size: 11px; text-align: center; line-height: 1.6; }
+.auth-field { display: grid; gap: 7px; margin: 14px 0; color: var(--ink-soft); font-size: 11px; font-weight: 600; }
+.auth-field input { width: 100%; height: 39px; padding: 0 11px; border: 1px solid #dfe5dc; border-radius: 6px; outline-color: var(--green); }
+.auth-submit { width: 100%; margin-top: 6px; }
+.auth-status { min-height: 16px; margin: 13px 0 0; color: var(--muted); font-size: 10px; text-align: center; line-height: 1.5; }
+.auth-status.error { color: #a53e35; }
+.sign-out-button { min-height: 30px; padding: 0 10px; font-size: 9px; }
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; height: 100vh; background: #fff; border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 27px 16px 18px; z-index: 4; }
 .brand { display: flex; align-items: center; gap: 11px; text-decoration: none; color: inherit; padding: 0 9px 31px; }

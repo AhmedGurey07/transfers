@@ -1,6 +1,9 @@
 (() => {
   const STORAGE_KEY = "ahmed-gurey-orders-v1";
   const DRIVERS_STORAGE_KEY = "ahmed-gurey-drivers-v1";
+  const isLocalRuntime = location.protocol === "file:"
+    || location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname);
+  const cloudDeployment = !isLocalRuntime;
   const categories = [
     "Tiles & marble",
     "Doors & mirrors",
@@ -84,6 +87,11 @@
   let lastSyncedVersion = "";
   let syncInProgress = false;
   let lastSyncError = "";
+  let supabaseClient = null;
+  let cloudUser = null;
+  let cloudChannel = null;
+  let cloudActivationPromise = null;
+  let cloudRefreshTimer = null;
   function indexProductCatalog() {
     productsByName.clear();
     productsByPdfName.clear();
@@ -167,6 +175,7 @@
   }
 
   async function syncSourceData(force = false) {
+    if (cloudDeployment) return;
     const fileApp = location.protocol === "file:";
     const localServer = location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname);
     if (!fileApp && !localServer) {
@@ -209,14 +218,189 @@
     }
   }
 
+  function setAuthStatus(message, isError = false) {
+    const status = $("#auth-status");
+    status.textContent = message;
+    status.classList.toggle("error", isError);
+  }
+
+  function showAuthGate(message, isError = false) {
+    $("#app-shell").hidden = true;
+    $("#auth-gate").hidden = false;
+    setAuthStatus(message, isError);
+  }
+
+  function disableAuthForm() {
+    $("#auth-email").disabled = true;
+    $("#auth-password").disabled = true;
+    $("#auth-submit").disabled = true;
+  }
+
+  async function loadCloudData(importLocalData) {
+    const [orderResult, driverResult] = await Promise.all([
+      supabaseClient.from("orders").select("id,data").order("id"),
+      supabaseClient.from("drivers").select("driver_key,name,phone").order("name")
+    ]);
+    if (orderResult.error) throw orderResult.error;
+    if (driverResult.error) throw driverResult.error;
+
+    let orderData = orderResult.data.map((row) => row.data);
+    if (importLocalData) {
+      const localOrders = loadOrders();
+      const onlineOrderIds = new Set(orderResult.data.map((row) => row.id));
+      const missingOrders = localOrders.filter((order) => !onlineOrderIds.has(order.id));
+      if (missingOrders.length) {
+        const { error } = await supabaseClient.from("orders").upsert(
+          missingOrders.map((order) => ({ id: order.id, data: order })),
+          { onConflict: "id" }
+        );
+        if (error) throw error;
+        orderData.push(...missingOrders);
+        showToast(`${missingOrders.length} existing ${missingOrders.length === 1 ? "order was" : "orders were"} imported online.`);
+      }
+    }
+
+    const driverData = driverResult.data.map(({ name, phone }) => ({ name, phone }));
+    if (importLocalData) {
+      const knownDrivers = new Set(driverData.map((driver) => driver.name.toLocaleLowerCase()));
+      const missingDrivers = loadDrivers().filter((driver) =>
+        !knownDrivers.has(driver.name.toLocaleLowerCase())
+      );
+      if (missingDrivers.length) {
+        const { error } = await supabaseClient.from("drivers").upsert(
+          missingDrivers.map((driver) => ({
+            driver_key: driver.name.trim().toLocaleLowerCase(),
+            name: driver.name,
+            phone: driver.phone
+          })),
+          { onConflict: "driver_key" }
+        );
+        if (error) throw error;
+        driverData.push(...missingDrivers);
+      }
+    }
+
+    orders = loadOrders(orderData);
+    drivers = loadDrivers(driverData);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
+      localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify(drivers));
+    } catch (error) {
+      console.warn("Could not keep a local backup of online data.", error);
+    }
+    renderSavedDrivers();
+    renderOverview();
+    renderAllOrders();
+    renderHistory();
+    refreshPreview();
+    setSyncStatus("Online · orders and drivers sync across signed-in devices.");
+  }
+
+  function scheduleCloudRefresh() {
+    clearTimeout(cloudRefreshTimer);
+    cloudRefreshTimer = window.setTimeout(async () => {
+      if (!cloudUser) return;
+      try {
+        await loadCloudData(false);
+      } catch (error) {
+        console.error("Could not refresh shared online data.", error);
+        setSyncStatus(`Online refresh failed — ${error.message}`, true);
+      }
+    }, 250);
+  }
+
+  function subscribeToCloudChanges() {
+    if (cloudChannel) supabaseClient.removeChannel(cloudChannel);
+    cloudChannel = supabaseClient.channel("order-desk-shared-data")
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, scheduleCloudRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "drivers" }, scheduleCloudRefresh)
+      .subscribe((status, error) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          const message = error?.message || `Realtime connection ${status.toLowerCase()}.`;
+          console.error("Could not subscribe to online changes.", error || message);
+          setSyncStatus(`Live updates unavailable — ${message}`, true);
+        }
+      });
+  }
+
+  async function activateCloudSession(user) {
+    if (cloudActivationPromise) return cloudActivationPromise;
+    const activation = (async () => {
+      cloudUser = user;
+      setAuthStatus("Loading your online orders…");
+      try {
+        await loadCloudData(true);
+        $("#auth-gate").hidden = true;
+        $("#app-shell").hidden = false;
+        $("#storage-description").textContent = `Signed in as ${user.email || "workspace member"}.`;
+        renderLoadedApp();
+        subscribeToCloudChanges();
+      } catch (error) {
+        cloudUser = null;
+        console.error("Could not load the online workspace.", error);
+        showAuthGate(`Could not load online data: ${error.message}`, true);
+      }
+    })();
+    cloudActivationPromise = activation;
+    try {
+      await activation;
+    } finally {
+      if (cloudActivationPromise === activation) cloudActivationPromise = null;
+    }
+  }
+
+  function lockCloudApp() {
+    if (cloudChannel && supabaseClient) supabaseClient.removeChannel(cloudChannel);
+    cloudChannel = null;
+    clearTimeout(cloudRefreshTimer);
+    resetForm();
+    setView("overview");
+    cloudUser = null;
+    orders = [];
+    drivers = [];
+    showAuthGate("Sign in to load your shared online workspace.");
+  }
+
+  function initializeOnlineMode() {
+    const config = window.ORDER_DESK_SUPABASE || {};
+    const validConfig = typeof config.url === "string" && config.url.startsWith("https://")
+      && typeof config.anonKey === "string" && config.anonKey.length > 20;
+    if (!window.supabase?.createClient) {
+      disableAuthForm();
+      showAuthGate("Could not load the Supabase client library. Check your internet connection and reload.", true);
+      return;
+    }
+    if (!validConfig) {
+      disableAuthForm();
+      showAuthGate("Online storage is not configured. Add your Supabase Project URL and anon key to supabase-config.js.", true);
+      return;
+    }
+
+    supabaseClient = window.supabase.createClient(config.url, config.anonKey);
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") lockCloudApp();
+      if (event === "SIGNED_IN" && session?.user) {
+        window.setTimeout(() => activateCloudSession(session.user), 0);
+      }
+    });
+    supabaseClient.auth.getSession().then(({ data, error }) => {
+      if (error) throw error;
+      if (data.session?.user) activateCloudSession(data.session.user);
+      else showAuthGate("Sign in to load your shared online workspace.");
+    }).catch((error) => {
+      console.error("Could not check the online sign-in session.", error);
+      showAuthGate(`Could not connect to Supabase: ${error.message}`, true);
+    });
+  }
+
   const isTileProduct = (product) => /\btile(?:s)?\b|\bmarmar\b/i.test(product);
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const form = $("#order-form");
   const itemsBody = $("#items-body");
   let needsMoneyDataCleanup = false;
-  let orders;
-  let drivers;
+  let orders = [];
+  let drivers = [];
   let editingId = null;
   let historyOrderFilter = "";
   let converterPinnedOpen = false;
@@ -225,12 +409,10 @@
   let printPreviewPdfUrl = null;
   let printLayout = "full-page";
   let toastTimer;
-  orders = loadOrders();
-  drivers = loadDrivers();
-
-  function loadOrders() {
+  function loadOrders(savedValue) {
     try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+      const source = savedValue === undefined ? localStorage.getItem(STORAGE_KEY) || "[]" : savedValue;
+      const saved = typeof source === "string" ? JSON.parse(source) : source;
       if (!Array.isArray(saved)) throw new Error("Saved order data is not a list.");
       needsMoneyDataCleanup = saved.some((order) =>
         order && ("currency" in order || Array.isArray(order.items) && order.items.some((item) => item && "price" in item))
@@ -304,7 +486,29 @@
     }
   }
 
-  function persistOrders() {
+  async function persistOrders(changedOrder) {
+    if (cloudDeployment) {
+      if (!supabaseClient || !cloudUser) {
+        showToast("Sign in before saving orders online.");
+        return false;
+      }
+      const savedOrders = changedOrder ? [changedOrder] : orders;
+      const { error } = await supabaseClient.from("orders").upsert(
+        savedOrders.map((order) => ({ id: order.id, data: order })),
+        { onConflict: "id" }
+      );
+      if (error) {
+        console.error("Could not save orders online.", error);
+        showToast(`Could not save online: ${error.message}`);
+        return false;
+      }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
+      } catch (error) {
+        console.warn("Could not keep a local order backup.", error);
+      }
+      return true;
+    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
     } catch (error) {
@@ -315,9 +519,10 @@
     return true;
   }
 
-  function loadDrivers() {
+  function loadDrivers(savedValue) {
     try {
-      const saved = JSON.parse(localStorage.getItem(DRIVERS_STORAGE_KEY) || "[]");
+      const source = savedValue === undefined ? localStorage.getItem(DRIVERS_STORAGE_KEY) || "[]" : savedValue;
+      const saved = typeof source === "string" ? JSON.parse(source) : source;
       if (!Array.isArray(saved)) throw new Error("Saved driver data is not a list.");
       return saved.filter((driver) =>
         driver && typeof driver.name === "string" && typeof driver.phone === "string"
@@ -330,7 +535,32 @@
     }
   }
 
-  function persistDrivers() {
+  async function persistDrivers() {
+    if (cloudDeployment) {
+      if (!supabaseClient || !cloudUser) {
+        showToast("Sign in before saving drivers online.");
+        return false;
+      }
+      const { error } = await supabaseClient.from("drivers").upsert(
+        drivers.map((driver) => ({
+          driver_key: driver.name.trim().toLocaleLowerCase(),
+          name: driver.name,
+          phone: driver.phone
+        })),
+        { onConflict: "driver_key" }
+      );
+      if (error) {
+        console.error("Could not save drivers online.", error);
+        showToast(`Could not save driver online: ${error.message}`);
+        return false;
+      }
+      try {
+        localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify(drivers));
+      } catch (error) {
+        console.warn("Could not keep a local driver backup.", error);
+      }
+      return true;
+    }
     try {
       localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify(drivers));
     } catch (error) {
@@ -360,7 +590,7 @@
     if (driver) $("#driver-phone").value = driver.phone;
   }
 
-  function saveDriver() {
+  async function saveDriver() {
     const name = $("#saved-driver-name").value.trim();
     const phone = $("#saved-driver-phone").value.trim();
     if (!name || !phone) {
@@ -368,10 +598,15 @@
       return;
     }
 
+    const previousDrivers = drivers;
     const index = drivers.findIndex((driver) => driver.name.toLocaleLowerCase() === name.toLocaleLowerCase());
     if (index >= 0) drivers[index] = { name, phone };
     else drivers.push({ name, phone });
-    if (!persistDrivers()) return;
+    if (!await persistDrivers()) {
+      drivers = previousDrivers;
+      renderSavedDrivers();
+      return;
+    }
 
     renderSavedDrivers();
     $("#order-driver").value = name;
@@ -1800,7 +2035,7 @@
       .map(([label]) => label);
   }
 
-  function saveOrder(event) {
+  async function saveOrder(event) {
     event.preventDefault();
     if (!form.reportValidity()) return;
     const order = readForm();
@@ -1824,7 +2059,7 @@
     orders = [...orders];
     if (index >= 0) orders[index] = order;
     else orders.push(order);
-    if (!persistOrders()) {
+    if (!await persistOrders(order)) {
       orders = previousOrders;
       return;
     }
@@ -1836,7 +2071,7 @@
     downloadOrderPdf(order, true);
   }
 
-  function changeStatus(id) {
+  async function changeStatus(id) {
     const order = orders.find((entry) => entry.id === id);
     if (!order || order.deletedAt) return;
     const statuses = ["Open", "In progress", "Completed"];
@@ -1848,7 +2083,7 @@
     const previousOrders = orders;
     orders = [...orders];
     orders[index] = updatedOrder;
-    if (!persistOrders()) {
+    if (!await persistOrders(updatedOrder)) {
       orders = previousOrders;
       return;
     }
@@ -1857,7 +2092,7 @@
     showToast(`${updatedOrder.id} marked ${updatedOrder.status.toLowerCase()}.`);
   }
 
-  function deleteOrder(id) {
+  async function deleteOrder(id) {
     const order = orders.find((entry) => entry.id === id);
     if (!order || order.deletedAt) return;
     if (!window.confirm(`Delete order ${order.id} for ${order.customer}? It will be removed from active orders, but its history will be kept.`)) return;
@@ -1867,7 +2102,7 @@
     const previousOrders = orders;
     orders = [...orders];
     orders[index] = deletedOrder;
-    if (!persistOrders()) {
+    if (!await persistOrders(deletedOrder)) {
       orders = previousOrders;
       return;
     }
@@ -1963,6 +2198,36 @@
     if (event.target === $("#category-select")) updateConverterVisibility();
   });
   form.addEventListener("submit", saveOrder);
+  $("#auth-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submit = $("#auth-submit");
+    submit.disabled = true;
+    setAuthStatus("Signing in…");
+    try {
+      const { data, error } = await supabaseClient.auth.signInWithPassword({
+        email: $("#auth-email").value.trim(),
+        password: $("#auth-password").value
+      });
+      if (error) throw error;
+      if (!data.user) throw new Error("Supabase did not return a signed-in user.");
+      await activateCloudSession(data.user);
+    } catch (error) {
+      console.error("Could not sign in to the online workspace.", error);
+      setAuthStatus(error.message || "Could not sign in.", true);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  $("#sign-out").addEventListener("click", async () => {
+    if (!supabaseClient) return;
+    const { error } = await supabaseClient.auth.signOut();
+    if (error) {
+      console.error("Could not sign out of the online workspace.", error);
+      showToast(`Could not sign out: ${error.message}`);
+      return;
+    }
+    lockCloudApp();
+  });
   $("#print-order").addEventListener("click", () => {
     if (!form.reportValidity()) return;
     const order = readForm();
@@ -1999,16 +2264,39 @@
     fitProductDescriptions($("#paper-items"));
   });
 
-  $("#today-label").textContent = new Intl.DateTimeFormat("en", { weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(new Date());
-  renderProductCatalogOptions();
-  renderSavedDrivers();
-  $("#order-date").value = dateValue();
-  createItemRow();
-  updateConverterVisibility();
-  updateConverter();
-  if (needsMoneyDataCleanup) persistOrders();
-  renderOverview();
-  refreshPreview();
-  syncSourceData();
-  window.setInterval(() => syncSourceData(), 3000);
+  function renderLoadedApp() {
+    $("#app-shell").hidden = false;
+    $("#auth-gate").hidden = true;
+    $("#sign-out").hidden = !cloudDeployment;
+    $("#storage-description").textContent = cloudDeployment
+      ? `Signed in as ${cloudUser?.email || "workspace member"}.`
+      : "Your orders are saved on this device.";
+    $("#today-label").textContent = new Intl.DateTimeFormat("en", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric"
+    }).format(new Date());
+    renderProductCatalogOptions();
+    renderSavedDrivers();
+    $("#order-date").value = dateValue();
+    if (!itemsBody.children.length) createItemRow();
+    updateConverterVisibility();
+    updateConverter();
+    if (needsMoneyDataCleanup && !cloudDeployment) persistOrders();
+    renderOverview();
+    refreshPreview();
+    if (!cloudDeployment) {
+      syncSourceData();
+      window.setInterval(() => syncSourceData(), 3000);
+    }
+  }
+
+  if (cloudDeployment) {
+    initializeOnlineMode();
+  } else {
+    orders = loadOrders();
+    drivers = loadDrivers();
+    renderLoadedApp();
+  }
 })();

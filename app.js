@@ -980,7 +980,7 @@
         .join(" ") || ""
       : "";
     const reference = firstPage.map((line) => line.items.map((item) => item.text).join(" "))
-      .map((text) => text.match(/\b[A-Z]{2,}\s*\/\s*[A-Z]+\s*\/\s*[\w-]+\b/i)?.[0].replace(/\s*\/\s*/g, "/"))
+      .map((text) => text.match(/\b[A-Z0-9]{2,}\s*\/\s*[A-Z0-9]+\s*\/\s*[\w-]+\b/i)?.[0].replace(/\s*\/\s*/g, "/"))
       .find(Boolean) || "";
     const items = [];
 

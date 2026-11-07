@@ -37,8 +37,8 @@ function Get-BlockNumber {
 }
 
 function Read-TileConverter {
-    param([string]$Key, [string]$Label, [string]$FileName, [bool]$UsesWeights = $false)
-    $path = Join-Path $calculatorPath $FileName
+    param([string]$Key, [string]$Label, [string]$FileName, [bool]$UsesWeights = $false, [string]$SourcePath = "")
+    $path = if ($SourcePath) { $SourcePath } else { Join-Path $calculatorPath $FileName }
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Converter source file is missing: $path"
     }
@@ -157,11 +157,15 @@ try {
         $unit = Convert-CellText $values[$row, ($firstColumn + 7)]
         if (-not $unit) { $unit = "PCS" }
         $qtyItem = Convert-CellText $values[$row, ($firstColumn + 3)]
+        $rQuantity = Convert-CellText $values[$row, ($firstColumn + 5)]
+        $uomN = Convert-CellText $values[$row, ($firstColumn + 6)]
         if (-not $productIndexes.ContainsKey($name)) {
             $entry = [pscustomobject]@{
                 product = $name
                 unit = $unit
                 qtyItems = [Collections.Generic.List[string]]::new()
+                rQuantities = [Collections.Generic.List[string]]::new()
+                uomNs = [Collections.Generic.List[string]]::new()
             }
             $productIndexes.Add($name, $products.Count)
             $products.Add($entry)
@@ -169,6 +173,8 @@ try {
         $entry = $products[$productIndexes[$name]]
         if ($entry.unit -eq "PCS" -and $unit -ne "PCS") { $entry.unit = $unit }
         if ($qtyItem -and -not $entry.qtyItems.Contains($qtyItem)) { $entry.qtyItems.Add($qtyItem) }
+        if ($rQuantity -and -not $entry.rQuantities.Contains($rQuantity)) { $entry.rQuantities.Add($rQuantity) }
+        if ($uomN -and -not $entry.uomNs.Contains($uomN)) { $entry.uomNs.Add($uomN) }
     }
     if ($products.Count -eq 0) {
         throw "No products were found in the SalesData sheet."
@@ -178,6 +184,12 @@ try {
             productBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_.product))
             unitBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_.unit))
             qtyItemsBase64 = @($_.qtyItems.ToArray() | ForEach-Object {
+                [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_))
+            })
+            rQuantitiesBase64 = @($_.rQuantities.ToArray() | ForEach-Object {
+                [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_))
+            })
+            uomNsBase64 = @($_.uomNs.ToArray() | ForEach-Object {
                 [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_))
             })
         }
@@ -204,7 +216,7 @@ $tileDefinitions = @(
     @{ key = "tile-30-60-marble"; label = "30x60 Marble"; file = "30X60marmardhagax.html" },
     @{ key = "tile-30-60-other"; label = "30x60 Other"; file = "30X60others.html" },
     @{ key = "tile-60-60-porcelain"; label = "60x60 Porcelain"; file = "60x60.html" },
-    @{ key = "tile-60-60-46-crt"; label = "60x60 Porcelain 46 CRT"; file = "60x6046crt.html" },
+    @{ key = "tile-60-60-46-crt"; label = "60x60 Porcelain 46 CRT"; file = "60x6046crt.html"; sourcePath = "C:\Users\User\OneDrive\Desktop\lessons\calculator\60x6046crt.html" },
     @{ key = "tile-60-60-ceramic"; label = "60x60 Ceramic"; file = "60X60ceramic.html" },
     @{ key = "tile-60-60-thick"; label = "60x60 High thickness"; file = "60X60highthickness.html" },
     @{ key = "tile-60-60-outdoor"; label = "60x60 Outdoor"; file = "60x60outdoor.html" },
@@ -215,7 +227,7 @@ $tileDefinitions = @(
 )
 $converterData = [ordered]@{}
 foreach ($definition in $tileDefinitions) {
-    $converter = Read-TileConverter $definition.key $definition.label $definition.file ([bool]$definition.weights)
+    $converter = Read-TileConverter $definition.key $definition.label $definition.file ([bool]$definition.weights) $definition.sourcePath
     $converterData[$converter.key] = [ordered]@{
         label = $converter.label
         falakad = $converter.falakad

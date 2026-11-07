@@ -1,9 +1,8 @@
 (() => {
   const STORAGE_KEY = "ahmed-gurey-orders-v1";
   const DRIVERS_STORAGE_KEY = "ahmed-gurey-drivers-v1";
-  const isLocalRuntime = location.protocol === "file:"
-    || location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname);
-  const cloudDeployment = !isLocalRuntime;
+  const cloudDeployment = location.protocol !== "file:"
+    || Boolean(window.ORDER_DESK_SUPABASE?.url && window.ORDER_DESK_SUPABASE?.anonKey);
   const categories = [
     "Tiles & marble",
     "Doors & mirrors",
@@ -137,6 +136,33 @@
       return option;
     }));
     $("#catalog-count").textContent = productCatalog.length.toLocaleString("en");
+    renderProductCatalogTable();
+  }
+
+  function renderProductCatalogTable() {
+    const query = $("#catalog-search").value.trim().toLocaleLowerCase();
+    const filtered = productCatalog.filter((item) =>
+      `${item.product} ${(item.qtyItems || []).join(" ")} ${(item.rQuantities || []).join(" ")} ${(item.uomNs || []).join(" ")} ${item.unit}`
+        .toLocaleLowerCase().includes(query)
+    );
+    const target = $("#catalog-products");
+    target.replaceChildren(...filtered.map((item) => {
+      const row = document.createElement("tr");
+      const product = document.createElement("td");
+      product.textContent = item.product;
+      const qtyItem = document.createElement("td");
+      qtyItem.textContent = item.qtyItems.length ? item.qtyItems.join(", ") : "—";
+      const rQuantity = document.createElement("td");
+      rQuantity.textContent = item.rQuantities?.length ? item.rQuantities.join(", ") : "—";
+      const uomN = document.createElement("td");
+      uomN.textContent = item.uomNs?.length ? item.uomNs.join(", ") : "—";
+      const unit = document.createElement("td");
+      unit.textContent = item.unit;
+      row.append(product, qtyItem, rQuantity, uomN, unit);
+      return row;
+    }));
+    $("#catalog-view-count").textContent = filtered.length.toLocaleString("en");
+    $("#catalog-empty").hidden = filtered.length > 0;
   }
 
   function setSyncStatus(message, isError = false) {
@@ -148,7 +174,8 @@
   function applySyncedSourceData(data) {
     if (!Array.isArray(data.products) || !data.products.length
       || data.products.some((item) => !item || typeof item.product !== "string"
-        || typeof item.unit !== "string" || !Array.isArray(item.qtyItems))) {
+        || typeof item.unit !== "string" || !Array.isArray(item.qtyItems)
+        || !Array.isArray(item.rQuantities) || !Array.isArray(item.uomNs))) {
       throw new Error("The updated Excel catalog has an invalid format.");
     }
     for (const key of Object.keys(converters)) {
@@ -192,7 +219,6 @@
   }
 
   async function syncSourceData(force = false) {
-    if (cloudDeployment) return;
     const fileApp = location.protocol === "file:";
     const localServer = location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname);
     if (!fileApp && !localServer) {
@@ -286,7 +312,12 @@
       contentType: file.type,
       upsert: true
     });
-    if (error) throw error;
+    if (error) {
+      if (error.message?.toLowerCase().includes("bucket not found")) {
+        throw new Error("Profile photo storage is not set up yet. Run the storage bucket setup from supabase-schema.sql in your Supabase SQL Editor, then try again.");
+      }
+      throw error;
+    }
     return path;
   }
 
@@ -1493,7 +1524,7 @@
     if (name === "profile" && (!cloudDeployment || !cloudUser)) name = "overview";
     $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${name}-view`));
     $$("[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === name));
-    const labels = { overview: "Overview", orders: "All orders", history: "Order history", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
+    const labels = { overview: "Overview", orders: "All orders", catalog: "Product catalog", history: "Order history", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
     $("#breadcrumb-current").textContent = labels[name] || "Overview";
     if (name === "orders") renderAllOrders();
     if (name === "history") renderHistory();
@@ -1508,12 +1539,14 @@
     row.innerHTML = `
       <td class="item-index"><button class="item-index-button" type="button" aria-pressed="false"></button></td>
       <td class="item-details" colspan="2">
-        <div class="item-product-row">
-          <label class="item-product-field"><span>PRODUCT / DESCRIPTION</span><input class="item-input product-input" aria-label="Product description" list="product-catalog" autocomplete="off" maxlength="120" placeholder="Search warehouse items or type a product" value="${escapeAttribute(item.product || "")}"></label>
-          <label class="item-ordered-field"><span>ORDERED</span><input class="item-input ordered-input" aria-label="Ordered" type="number" min="0" step="any" placeholder="0" value="${escapeAttribute(item.ordered ?? "")}"></label>
-          <label class="item-qty-item-field"><span>QTY/ITEM</span><span class="qty-item-control"></span></label>
+        <div class="item-entry-layout">
+          <div class="item-product-row">
+            <label class="item-product-field"><span>PRODUCT / DESCRIPTION</span><input class="item-input product-input" aria-label="Product description" list="product-catalog" autocomplete="off" maxlength="120" placeholder="Search warehouse items or type a product" value="${escapeAttribute(item.product || "")}"></label>
+            <label class="item-ordered-field"><span>ORDERED</span><input class="item-input ordered-input" aria-label="Ordered" type="number" min="0" step="any" placeholder="0" value="${escapeAttribute(item.ordered ?? "")}"></label>
+            <label class="item-qty-item-field"><span>QTY/ITEM</span><span class="qty-item-control"></span></label>
+          </div>
+          <div class="quantity-fields"><span class="quantity-fields-heading">QUANTITIES &amp; UNITS</span><div class="quantity-pairs"></div><small class="qty-calculation-message" role="status" hidden></small></div>
         </div>
-        <div class="quantity-fields"><span class="quantity-fields-heading">QUANTITIES &amp; UNITS</span><div class="quantity-pairs"></div><small class="qty-calculation-message" role="status" hidden></small></div>
       </td>
       <td><button class="remove-item" type="button" aria-label="Remove item">×</button></td>`;
     renderQtyItemField(row, item.qtyItem);
@@ -1527,19 +1560,23 @@
 
   function renderQuantityFields(row, item = {}, unitDefaults = [], { showZero = false } = {}) {
     const product = $(".product-input", row).value.trim();
-    const catalogUnit = getCatalogProduct(product)?.unit || units[0];
+    const productData = getCatalogProduct(product);
+    const catalogUnit = productData?.unit || units[0];
     const savedQuantities = Array.isArray(item.quantities)
       ? item.quantities
       : [{ quantity: item.quantity, unit: item.unit }];
-    const count = isTileProduct(product) ? 3 : Math.max(1, savedQuantities.length);
+    const hasQtyItem = !isTileProduct(product) && Boolean(productData?.qtyItems?.length);
+    const count = isTileProduct(product) ? 3 : hasQtyItem ? 2 : Math.max(1, savedQuantities.length);
     row.classList.toggle("tile-product", isTileProduct(product));
     $(".quantity-pairs", row).innerHTML = Array.from({ length: count }, (_, index) => {
       const saved = savedQuantities[index] || {};
-      const unit = units.includes(saved.unit) ? saved.unit : unitDefaults[index] || catalogUnit;
-      const label = count === 1 ? "" : ` ${index + 1}`;
+      const defaultUnit = unitDefaults[index] || (hasQtyItem && index === 1 ? "FIRI" : catalogUnit);
+      const unit = units.includes(saved.unit) ? saved.unit : defaultUnit;
+      const quantityLabel = hasQtyItem ? (index === 0 ? "QTY" : "FIRI") : `QTY${count === 1 ? "" : ` ${index + 1}`}`;
+      const label = count === 1 ? "" : ` ${quantityLabel}`;
       return `
         <div class="quantity-pair">
-          <label><span>QTY${label}</span><input class="item-input quantity-input" aria-label="Quantity${label}" type="number" min="0" step="any" placeholder="0" value="${saved.quantity == null || saved.quantity === "" || !showZero && Number(saved.quantity) === 0 ? "" : Number(saved.quantity)}"></label>
+          <label><span>${quantityLabel}</span><input class="item-input quantity-input" aria-label="${quantityLabel}" type="number" min="0" step="any" placeholder="0" value="${saved.quantity == null || saved.quantity === "" || !showZero && Number(saved.quantity) === 0 ? "" : Number(saved.quantity)}"></label>
           <label><span>UNIT${label}</span><select class="item-input unit-input" aria-label="Unit${label}">${units.map((option) => `<option${unit === option ? " selected" : ""}>${option}</option>`).join("")}</select></label>
         </div>`;
     }).join("");
@@ -1617,31 +1654,45 @@
   function calculateOrderedQuantity(row) {
     const orderedInput = $(".ordered-input", row);
     const qtyItemInput = $(".qty-item-input", row);
-    const quantityInput = $(".quantity-input", row);
+    const quantityInputs = $$(".quantity-input", row);
+    const quantityInput = quantityInputs[0];
     const message = $(".qty-calculation-message", row);
     const ordered = Number(orderedInput.value);
     const qtyItem = Number(qtyItemInput.value.trim().replace(",", "."));
     if (!orderedInput.value || !Number.isFinite(ordered) || !Number.isFinite(qtyItem) || qtyItem <= 0 || !quantityInput) {
-      if (row.dataset.autoCalculated === "true" && quantityInput?.value === row.dataset.autoCalculatedValue) {
-        quantityInput.value = "";
+      if (row.dataset.autoCalculated === "true") {
+        const autoValues = JSON.parse(row.dataset.autoCalculatedValues || "[]");
+        quantityInputs.forEach((input, index) => {
+          if (input.value === autoValues[index]) input.value = "";
+        });
       }
       delete row.dataset.autoCalculated;
-      delete row.dataset.autoCalculatedValue;
+      delete row.dataset.autoCalculatedValues;
       message.hidden = true;
       message.textContent = "";
       return;
     }
 
     const exactQuantity = ordered / qtyItem;
-    const roundedQuantity = Math.round(exactQuantity);
-    quantityInput.value = String(roundedQuantity);
+    const hasFiriQuantity = !isTileProduct($(".product-input", row).value)
+      && quantityInputs.length > 1
+      && getCatalogProduct($(".product-input", row).value)?.qtyItems?.length;
+    const calculatedQuantity = hasFiriQuantity
+      ? Math.floor(exactQuantity + Number.EPSILON)
+      : Math.round(exactQuantity);
+    const firiQuantity = hasFiriQuantity
+      ? Math.max(0, Number((ordered - calculatedQuantity * qtyItem).toFixed(6)))
+      : null;
+    quantityInput.value = String(calculatedQuantity);
+    if (hasFiriQuantity) quantityInputs[1].value = String(firiQuantity);
     row.dataset.autoCalculated = "true";
-    row.dataset.autoCalculatedValue = String(roundedQuantity);
-    if (Number.isInteger(exactQuantity)) {
+    const autoValues = hasFiriQuantity ? [calculatedQuantity, firiQuantity] : [calculatedQuantity];
+    row.dataset.autoCalculatedValues = JSON.stringify(autoValues.map(String));
+    if (hasFiriQuantity || Number.isInteger(exactQuantity)) {
       message.hidden = true;
       message.textContent = "";
     } else {
-      message.textContent = `Fadlan tirada iska hagaaji. Tirada la soo jeediyay: ${roundedQuantity}`;
+      message.textContent = `Fadlan tirada iska hagaaji. Tirada la soo jeediyay: ${calculatedQuantity}`;
       message.hidden = false;
     }
   }
@@ -1659,19 +1710,25 @@
       quantity: $(".quantity-input", pair).value,
       unit: $(".unit-input", pair).value
     }));
-    if (productChanged && row.dataset.autoCalculated === "true" && previousQuantities[0]) {
-      previousQuantities[0].quantity = "";
+    if (productChanged && row.dataset.autoCalculated === "true") {
+      const autoValues = JSON.parse(row.dataset.autoCalculatedValues || "[]");
+      previousQuantities.forEach((quantity, index) => {
+        if (quantity.quantity === autoValues[index]) quantity.quantity = "";
+      });
       delete row.dataset.autoCalculated;
-      delete row.dataset.autoCalculatedValue;
+      delete row.dataset.autoCalculatedValues;
     }
     const tileProduct = isTileProduct(product);
-    const nextCount = tileProduct ? 3 : 1;
+    const hasQtyItem = Boolean(item?.qtyItems?.length);
+    const nextCount = tileProduct ? 3 : hasQtyItem ? 2 : 1;
     const currentCount = previousQuantities.length;
-    const unitDefaults = tileProduct ? tileUnits : item ? [item.unit] : [previousQuantities[0]?.unit || units[0]];
+    const unitDefaults = tileProduct ? tileUnits
+      : hasQtyItem ? [item.unit, "FIRI"]
+        : item ? [item.unit] : [previousQuantities[0]?.unit || units[0]];
     if (nextCount !== currentCount) {
       const quantities = tileProduct
         ? previousQuantities.map(({ quantity }) => ({ quantity }))
-        : previousQuantities;
+        : previousQuantities.map((quantity) => productChanged ? { ...quantity, unit: "" } : quantity);
       renderQuantityFields(row, { product, quantities }, unitDefaults);
     } else {
       $$(".unit-input", row).forEach((select, index) => { select.value = unitDefaults[index] || units[0]; });
@@ -2401,8 +2458,10 @@
   function renderAllOrders() {
     const query = $("#order-search").value.trim().toLowerCase();
     const status = $("#status-filter").value;
+    const date = $("#order-date-filter").value;
     const filtered = orders.filter((order) => !order.deletedAt).sort((a, b) => b.createdAt - a.createdAt).filter((order) =>
       (status === "all" || order.status === status) &&
+      (!date || order.date === date) &&
       `${order.id} ${order.customer} ${order.transferId || ""} ${order.category}`.toLowerCase().includes(query)
     );
     const target = $("#all-orders");
@@ -2650,9 +2709,11 @@
     if (event.target.matches(".ordered-input")) calculateOrderedQuantity(event.target.closest("tr"));
     if (event.target.matches(".quantity-input")) {
       const row = event.target.closest("tr");
-      if (event.target.value !== row.dataset.autoCalculatedValue) {
+      const index = $$(".quantity-input", row).indexOf(event.target);
+      const autoValues = JSON.parse(row.dataset.autoCalculatedValues || "[]");
+      if (event.target.value !== autoValues[index]) {
         delete row.dataset.autoCalculated;
-        delete row.dataset.autoCalculatedValue;
+        delete row.dataset.autoCalculatedValues;
       }
     }
     updateItems();
@@ -2770,6 +2831,8 @@
   $("#download-pdf").addEventListener("click", () => downloadOrderPdf());
   $("#order-search").addEventListener("input", renderAllOrders);
   $("#status-filter").addEventListener("change", renderAllOrders);
+  $("#order-date-filter").addEventListener("change", renderAllOrders);
+  $("#catalog-search").addEventListener("input", renderProductCatalogTable);
   window.addEventListener("resize", () => {
     fitProductDescriptions($("#preview-items"));
     fitProductDescriptions($("#paper-items"));
@@ -2802,7 +2865,8 @@
     if (needsMoneyDataCleanup && !cloudDeployment) persistOrders();
     renderOverview();
     refreshPreview();
-    if (!cloudDeployment) {
+    if (location.protocol === "file:"
+      || location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname)) {
       syncSourceData();
       window.setInterval(() => syncSourceData(), 3000);
     }

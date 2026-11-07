@@ -65,6 +65,7 @@
         <a class="nav-link" href="#orders" data-view="orders"><span class="nav-icon">▤</span> All orders <span class="nav-count" id="nav-order-count">0</span></a>
         <a class="nav-link" href="#history" data-view="history"><span class="nav-icon">◷</span> Order history</a>
         <a class="nav-link" href="#new-order" data-view="new-order"><span class="nav-icon">＋</span> Create an order</a>
+        <a class="nav-link" href="#catalog" data-view="catalog"><span class="nav-icon">▦</span> Product catalog</a>
         <a class="nav-link" href="#users" data-view="users" id="users-nav-link" hidden><span class="nav-icon">♙</span> Users</a>
       </nav>
 
@@ -133,8 +134,14 @@
 
       <section class="view" id="orders-view" aria-labelledby="orders-title">
         <div class="page-heading"><div><p class="eyebrow">YOUR BUSINESS RECORDS</p><h1 id="orders-title">All orders</h1><p class="welcome-copy">Review, update, and print your saved orders.</p></div><button class="button button-primary" type="button" data-action="new-order"><span class="button-plus">＋</span> Create new order</button></div>
-        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search customer or order number" aria-label="Search orders"></label><label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Open">Open</option><option value="In progress">In progress</option><option value="Completed">Completed</option></select></label></div>
+        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search customer or order number" aria-label="Search orders"></label><label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Open">Open</option><option value="In progress">In progress</option><option value="Completed">Completed</option></select></label><label class="filter-select filter-date"><span class="sr-only">Filter by order date</span><input id="order-date-filter" type="date" aria-label="Filter by order date"></label></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th>ORDER</th><th>CUSTOMER</th><th>TRANSFER ID</th><th>DATE</th><th>STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="all-orders"></tbody></table></div><div class="empty-state" id="orders-empty"><span class="empty-icon">⌕</span><strong>No matching orders</strong><span>Try changing your search or create a new order.</span></div></div>
+      </section>
+
+      <section class="view" id="catalog-view" aria-labelledby="catalog-title">
+        <div class="page-heading"><div><p class="eyebrow">WAREHOUSE WORKBOOK</p><h1 id="catalog-title">Product catalog</h1><p class="welcome-copy">Products and quantities loaded from the warehouse Excel workbook.</p></div><span class="item-count"><span id="catalog-view-count">0</span> products</span></div>
+        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="catalog-search" type="search" placeholder="Search product, code, unit, or quantity" aria-label="Search product catalog"></label></div>
+        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>PRODUCT / DESCRIPTION</th><th>Q/ITEM</th><th>R/QUANTITY</th><th>UOM/N</th><th>UOM</th></tr></thead><tbody id="catalog-products"></tbody></table></div><div class="empty-state" id="catalog-empty" hidden><span class="empty-icon">⌕</span><strong>No matching products</strong><span>Try a different product name, code, quantity, or unit.</span></div></div>
       </section>
 
       <section class="view" id="history-view" aria-labelledby="history-title">
@@ -242,6 +249,7 @@
                     <option value="tile-30-60-marble">30 × 60 — Marble</option>
                     <option value="tile-30-60-other">30 × 60 — Other</option>
                     <option value="tile-60-60-porcelain">60 × 60 — Porcelain</option>
+                    <option value="tile-60-60-46-crt">60 × 60 — Porcelain 46 CRT</option>
                     <option value="tile-60-60-ceramic">60 × 60 — Ceramic</option>
                     <option value="tile-60-60-thick">60 × 60 — High thickness</option>
                     <option value="tile-60-60-outdoor">60 × 60 — Outdoor</option>
@@ -262,7 +270,7 @@
 
               <article class="panel items-panel">
                 <div class="panel-heading"><div><span class="step-number">02</span><div><h2>Order items</h2><p>Choose from <span id="catalog-count"></span> warehouse products or type a custom item.</p></div></div><button class="button button-secondary converter-toggle" id="toggle-converter" type="button" aria-expanded="false">Use area converter</button><span class="item-count" id="item-count">0 items</span></div>
-                <div class="items-table-wrap"><table class="items-table"><thead><tr><th class="item-number-col">#</th><th colspan="2">PRODUCT / DESCRIPTION (QUANTITIES &amp; UNITS BELOW)</th><th></th></tr></thead><tbody id="items-body"></tbody></table></div>
+                <div class="items-table-wrap"><table class="items-table"><thead><tr><th class="item-number-col">#</th><th>PRODUCT / DESCRIPTION</th><th class="quantity-heading">QUANTITIES &amp; UNITS</th><th></th></tr></thead><tbody id="items-body"></tbody></table></div>
                 <button class="add-item-button" type="button" id="add-item"><span>＋</span> Add an item</button>
               </article>
               <div class="form-actions"><span class="save-hint"><span class="save-check">✓</span> Your order is saved in this browser.</span><div><button class="button button-quiet" type="button" id="print-order">Preview</button><button class="button button-secondary" type="button" data-action="cancel-order">Cancel</button><button class="button button-primary" type="submit"><span class="button-plus">✓</span> Save order</button></div></div>

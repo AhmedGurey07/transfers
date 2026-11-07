@@ -7,6 +7,7 @@ const { execFile } = require("node:child_process");
 const root = __dirname;
 const workbookPath = "C:\\Users\\User\\OneDrive\\Desktop\\Ware house 200 last update 04-07-2026.xlsm";
 const calculatorPath = "C:\\Users\\User\\OneDrive\\Desktop\\AHMED FOLDER\\calculator";
+const additionalConverterPath = "C:\\Users\\User\\OneDrive\\Desktop\\lessons\\calculator\\60x6046crt.html";
 const sourceReader = path.join(root, "read-sources.ps1");
 const port = Number(process.env.PORT) || 8765;
 const hiddenFiles = new Set(["read-sources.ps1", "sync-server.js", "start order desk.cmd"]);
@@ -17,7 +18,7 @@ let attemptedSourceStamp = "";
 let refreshInProgress = null;
 
 function getSourceStamp() {
-  const files = [workbookPath, ...fs.readdirSync(calculatorPath)
+  const files = [workbookPath, additionalConverterPath, ...fs.readdirSync(calculatorPath)
     .filter((name) => name.toLowerCase().endsWith(".html"))
     .map((name) => path.join(calculatorPath, name))];
   return files.map((file) => {
@@ -43,7 +44,9 @@ function readSourceData() {
         data.products = data.products.map((item) => ({
           product: Buffer.from(item.productBase64, "base64").toString("utf8"),
           unit: Buffer.from(item.unitBase64, "base64").toString("utf8"),
-          qtyItems: item.qtyItemsBase64.map((value) => Buffer.from(value, "base64").toString("utf8"))
+          qtyItems: item.qtyItemsBase64.map((value) => Buffer.from(value, "base64").toString("utf8")),
+          rQuantities: item.rQuantitiesBase64.map((value) => Buffer.from(value, "base64").toString("utf8")),
+          uomNs: item.uomNsBase64.map((value) => Buffer.from(value, "base64").toString("utf8"))
         }));
         if (!data.products.length) {
           throw new Error("The source reader returned incomplete catalog or converter data.");

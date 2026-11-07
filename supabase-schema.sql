@@ -75,6 +75,16 @@ create policy "Users can upload their own profile photo"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "Users can read their own profile photo" on storage.objects;
+create policy "Users can read their own profile photo"
+  on storage.objects
+  for select
+  to authenticated
+  using (
+    bucket_id = 'profile-photos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
 drop policy if exists "Users can update their own profile photo" on storage.objects;
 create policy "Users can update their own profile photo"
   on storage.objects

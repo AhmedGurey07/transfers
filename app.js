@@ -979,9 +979,9 @@
         .map((item) => item.text)
         .join(" ") || ""
       : "";
-    const reference = firstPage.map((line) => line.items.map((item) => item.text).join(" "))
-      .map((text) => text.match(/\b[A-Z0-9]{2,}\s*\/\s*[A-Z0-9]+\s*\/\s*[\w-]+\b/i)?.[0].replace(/\s*\/\s*/g, "/"))
-      .find(Boolean) || "";
+    const referenceText = firstPage.flatMap((line) => line.items.map((item) => item.text)).join(" ");
+    const referenceMatch = referenceText.match(/\b([A-Z0-9]{2,})\s*\/\s*([A-Z0-9]+)\s*\/\s*([\w-]+)\b/i);
+    const reference = referenceMatch ? `${referenceMatch[1]}/${referenceMatch[2]}/${referenceMatch[3]}` : "";
     const items = [];
 
     pages.forEach((lines) => {

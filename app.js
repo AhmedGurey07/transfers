@@ -21,6 +21,16 @@
     if (name === "hamze ali") return "Hamze Ali";
     return "";
   }
+  function createdByForUser(user) {
+    const displayName = normalizeCreatedBy(user?.user_metadata?.display_name);
+    if (displayName) return displayName;
+    const identity = `${user?.email || ""} ${user?.user_metadata?.username || ""}`
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+    if (identity.includes("hamzeali")) return "Hamze Ali";
+    if (identity.includes("engahmedgurey") || identity.includes("ahmedgurey")) return "Eng Ahmed Gurey";
+    return "Eng Ahmed Gurey";
+  }
   const units = ["PCS", "CRT", "BOX", "ROLL", "MTR", "FLK", "SXRD", "XIDH", "FIRI", "SET", "M", "SQM", "KG", "BAG"];
   const tileUnits = ["FLK", "CRT", "FIRI"];
   const converters = {
@@ -90,6 +100,7 @@
   let supabaseClient = null;
   let cloudUser = null;
   let cloudRole = "staff";
+  let currentPreparedBy = "Eng Ahmed Gurey";
   let workspaceUsers = [];
   let cloudChannel = null;
   let cloudActivationPromise = null;
@@ -772,6 +783,8 @@
     if (cloudActivationPromise) return cloudActivationPromise;
     const activation = (async () => {
       cloudUser = user;
+      currentPreparedBy = createdByForUser(user);
+      form.elements.preparedBy.value = currentPreparedBy;
       setAuthStatus("Loading your online orders…");
       try {
         const roleResult = await supabaseClient.from("workspace_user_roles")
@@ -1774,6 +1787,16 @@
     $("#toggle-converter").textContent = converterPinnedOpen ? "Hide area converter" : "Use area converter";
   }
 
+  function setConverterTab(tab) {
+    const showLive = tab === "live";
+    $("#quick-converter-panel").hidden = showLive;
+    $("#live-converter-panel").hidden = !showLive;
+    $("#quick-converter-tab").classList.toggle("active", !showLive);
+    $("#live-converter-tab").classList.toggle("active", showLive);
+    $("#quick-converter-tab").setAttribute("aria-selected", String(!showLive));
+    $("#live-converter-tab").setAttribute("aria-selected", String(showLive));
+  }
+
   function addConversionToOrder() {
     const items = converterItems();
     if (!items.length) return;
@@ -2439,6 +2462,7 @@
     form.reset();
     editingId = null;
     converterPinnedOpen = false;
+    form.elements.preparedBy.value = currentPreparedBy;
     $("#order-date").value = dateValue();
     $("#category-select").value = categories[0];
     itemsBody.replaceChildren();
@@ -2626,6 +2650,8 @@
   $("#converter-mode").addEventListener("change", updateConverter);
   $("#converter-area").addEventListener("input", updateConverter);
   $("#add-conversion").addEventListener("click", addConversionToOrder);
+  $("#quick-converter-tab").addEventListener("click", () => setConverterTab("quick"));
+  $("#live-converter-tab").addEventListener("click", () => setConverterTab("live"));
   $("#toggle-converter").addEventListener("click", () => {
     converterPinnedOpen = !converterPinnedOpen;
     updateConverterVisibility();

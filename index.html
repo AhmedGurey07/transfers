@@ -231,33 +231,44 @@
 
               <article class="panel converter-panel" id="converter-panel" hidden>
                 <div class="panel-heading"><div><span class="step-number">↔</span><div><h2>Area converter</h2><p>Enter square meters to calculate the matching product units.</p></div></div></div>
-                <div class="converter-controls">
-                  <label class="field"><span>Calculator <i>*</i></span><select id="converter-mode">
-                    <option value="tile-40-normal">40 × 40 — Normal</option>
-                    <option value="tile-40-outdoor">40 × 40 — Outdoor</option>
-                    <option value="tile-40-new">40 × 40 — New</option>
-                    <option value="tile-30-30">30 × 30</option>
-                    <option value="tile-30-45">30 × 45 — Normal</option>
-                    <option value="tile-30-45-88">30 × 45 — 88 CRT</option>
-                    <option value="tile-30-60-marble">30 × 60 — Marble</option>
-                    <option value="tile-30-60-other">30 × 60 — Other</option>
-                    <option value="tile-60-60-porcelain">60 × 60 — Porcelain</option>
-                    <option value="tile-60-60-ceramic">60 × 60 — Ceramic</option>
-                    <option value="tile-60-60-thick">60 × 60 — High thickness</option>
-                    <option value="tile-60-60-outdoor">60 × 60 — Outdoor</option>
-                    <option value="tile-60-120-large">60 × 120 — Large</option>
-                    <option value="tile-60-120-small">60 × 120 — Small</option>
-                    <option value="tile-20-120">20 × 120</option>
-                    <option value="tile-37-25">37 × 25</option>
-                    <option value="gypsum-caag">Gypsum — Caag</option>
-                    <option value="gypsum-saafi">Gypsum — Saafi</option>
-                  </select></label>
-                  <label class="field"><span>Area (m²) <i>*</i></span><input id="converter-area" type="number" min="0.01" step="any" placeholder="Enter meters"></label>
+                <div class="converter-tabs" role="tablist" aria-label="Choose a converter">
+                  <button class="button button-secondary converter-tab active" id="quick-converter-tab" type="button" role="tab" aria-selected="true" aria-controls="quick-converter-panel">Quick add to order</button>
+                  <button class="button button-secondary converter-tab" id="live-converter-tab" type="button" role="tab" aria-selected="false" aria-controls="live-converter-panel">Live source converter</button>
                 </div>
-                <div class="converter-results" id="converter-results" aria-live="polite">
-                  <div class="converter-empty">Enter an area to see the converted quantities.</div>
+                <div id="quick-converter-panel" role="tabpanel" aria-labelledby="quick-converter-tab">
+                  <div class="converter-controls">
+                    <label class="field"><span>Calculator <i>*</i></span><select id="converter-mode">
+                      <option value="tile-40-normal">40 × 40 — Normal</option>
+                      <option value="tile-40-outdoor">40 × 40 — Outdoor</option>
+                      <option value="tile-40-new">40 × 40 — New</option>
+                      <option value="tile-30-30">30 × 30</option>
+                      <option value="tile-30-45">30 × 45 — Normal</option>
+                      <option value="tile-30-45-88">30 × 45 — 88 CRT</option>
+                      <option value="tile-30-60-marble">30 × 60 — Marble</option>
+                      <option value="tile-30-60-other">30 × 60 — Other</option>
+                      <option value="tile-60-60-porcelain">60 × 60 — Porcelain</option>
+                      <option value="tile-60-60-ceramic">60 × 60 — Ceramic</option>
+                      <option value="tile-60-60-thick">60 × 60 — High thickness</option>
+                      <option value="tile-60-60-outdoor">60 × 60 — Outdoor</option>
+                      <option value="tile-60-120-large">60 × 120 — Large</option>
+                      <option value="tile-60-120-small">60 × 120 — Small</option>
+                      <option value="tile-20-120">20 × 120</option>
+                      <option value="tile-37-25">37 × 25</option>
+                      <option value="gypsum-caag">Gypsum — Caag</option>
+                      <option value="gypsum-saafi">Gypsum — Saafi</option>
+                    </select></label>
+                    <label class="field"><span>Area (m²) <i>*</i></span><input id="converter-area" type="number" min="0.01" step="any" placeholder="Enter meters"></label>
+                  </div>
+                  <div class="converter-results" id="converter-results" aria-live="polite">
+                    <div class="converter-empty">Enter an area to see the converted quantities.</div>
+                  </div>
+                  <button class="button button-secondary converter-add" type="button" id="add-conversion" disabled>Add converted items to order</button>
                 </div>
-                <button class="button button-secondary converter-add" type="button" id="add-conversion" disabled>Add converted items to order</button>
+                <div id="live-converter-panel" role="tabpanel" aria-labelledby="live-converter-tab" hidden>
+                  <p class="auth-copy live-converter-copy">This calculator loads directly from the converter website, so published changes there appear here automatically.</p>
+                  <iframe class="live-converter-frame" id="live-converter-frame" src="https://ahmedgurey07.github.io/convertor/" title="Live Shaafici tile and gypsum converter" loading="lazy" referrerpolicy="no-referrer"></iframe>
+                  <a class="text-button live-converter-link" href="https://ahmedgurey07.github.io/convertor/" target="_blank" rel="noopener noreferrer">Open converter in a new tab ↗</a>
+                </div>
               </article>
 
               <article class="panel items-panel">

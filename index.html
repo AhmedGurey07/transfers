@@ -41,6 +41,7 @@
         <a class="nav-link" href="#orders" data-view="orders"><span class="nav-icon">▤</span> All orders <span class="nav-count" id="nav-order-count">0</span></a>
         <a class="nav-link" href="#history" data-view="history"><span class="nav-icon">◷</span> Order history</a>
         <a class="nav-link" href="#new-order" data-view="new-order"><span class="nav-icon">＋</span> Create an order</a>
+        <a class="nav-link" href="#users" data-view="users" id="users-nav-link" hidden><span class="nav-icon">♙</span> Users</a>
       </nav>
 
       <div class="nav-label category-label">ORDER FORMS</div>
@@ -116,6 +117,39 @@
         <div class="page-heading"><div><p class="eyebrow">ORDER AUDIT TRAIL</p><h1 id="history-title">Order history</h1><p class="welcome-copy">Review order creation, edits, status changes, and deletions.</p></div><button class="button button-secondary" type="button" id="history-show-all">Show all history</button></div>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="history-search" type="search" placeholder="Search order, customer, or activity" aria-label="Search order history"></label><span id="history-filter-label" class="history-filter-label"></span></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th>WHEN</th><th>ORDER</th><th>CUSTOMER</th><th>ACTIVITY</th></tr></thead><tbody id="order-history"></tbody></table></div><div class="empty-state" id="history-empty"><span class="empty-icon">◷</span><strong>No history yet</strong><span>Order activity will appear here.</span></div></div>
+      </section>
+
+      <section class="view" id="users-view" aria-labelledby="users-title">
+        <div class="page-heading"><div><p class="eyebrow">WORKSPACE ACCESS</p><h1 id="users-title">Users</h1><p class="welcome-copy">Invite staff and manage access to the shared workspace.</p></div><button class="button button-secondary" type="button" id="users-refresh">Refresh users</button></div>
+        <div class="builder-layout users-layout">
+          <section class="panel" aria-labelledby="user-form-title">
+            <div class="panel-heading"><div><h2 id="user-form-title">Invite a user</h2><p id="user-form-help">They’ll receive an email invitation to set their password.</p></div></div>
+            <form id="user-form">
+              <input id="managed-user-id" type="hidden">
+              <label class="field">Full name
+                <input class="item-input" id="managed-user-name" type="text" maxlength="120" autocomplete="name" required>
+              </label>
+              <label class="field">Email
+                <input class="item-input" id="managed-user-email" type="email" maxlength="254" autocomplete="email" required>
+              </label>
+              <label class="field" id="managed-user-role-field">Role
+                <select class="item-input" id="managed-user-role">
+                  <option value="staff">Staff</option>
+                  <option value="admin">Admin</option>
+                  <option value="owner">Owner</option>
+                </select>
+              </label>
+              <p class="auth-copy" id="user-role-help">Admins can invite and manage staff. Only the owner can grant or remove admin access.</p>
+              <div class="form-actions"><div><button class="button button-primary" id="save-managed-user" type="submit">Send invitation</button><button class="button button-quiet" id="cancel-user-edit" type="button" hidden>Cancel</button></div></div>
+              <p class="auth-status" id="users-status" role="status" aria-live="polite"></p>
+            </form>
+          </section>
+          <section class="panel users-list-panel" aria-labelledby="workspace-users-heading">
+            <div class="panel-heading"><div><h2 id="workspace-users-heading">Workspace users</h2><p>Inactive users can no longer sign in; their records remain available.</p></div></div>
+            <div class="table-scroll"><table><thead><tr><th>NAME</th><th>EMAIL</th><th>ROLE</th><th>STATUS</th><th>LAST SIGN-IN</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="workspace-users"></tbody></table></div>
+            <div class="empty-state" id="users-empty" hidden><strong>No workspace users found</strong><span>Invite a staff member to get started.</span></div>
+          </section>
+        </div>
       </section>
 
       <section class="view" id="new-order-view" aria-labelledby="order-form-title">

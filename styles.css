@@ -375,6 +375,14 @@ table { border-collapse: collapse; width: 100%; text-align: left; }
 @media (max-width: 620px) { .converter-controls { grid-template-columns: 1fr; } .converter-result-row { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 620px) { .drivers-manager-fields { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .main-footer { flex-wrap: wrap; gap: 7px; } .sync-status { flex-basis: 100%; text-align: left; } }
+.users-layout { grid-template-columns: minmax(260px,.75fr) minmax(0,1.8fr); }
+.users-list-panel { min-width: 0; overflow: hidden; }
+.users-list-panel .table-scroll { overflow-x: auto; }
+.users-list-panel table { min-width: 620px; }
+.user-row-actions { display: flex; gap: 5px; }
+.user-row-actions .button { min-height: 28px; padding: 0 8px; font-size: 9px; }
+@media (max-width: 820px) { .users-layout { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .navigation { grid-template-columns: repeat(4,minmax(0,1fr)); } .navigation .nav-link[data-view="users"]:not([hidden]) { display: flex; } }
 @media print {
   #take-receipt-screenshot,
   .receipt-screenshot-button { display: none !important; visibility: hidden !important; }

@@ -89,6 +89,8 @@
   let lastSyncError = "";
   let supabaseClient = null;
   let cloudUser = null;
+  let cloudRole = "staff";
+  let workspaceUsers = [];
   let cloudChannel = null;
   let cloudActivationPromise = null;
   let cloudRefreshTimer = null;
@@ -296,6 +298,186 @@
     setSyncStatus("Online · orders and drivers sync across signed-in devices.");
   }
 
+  function setUsersStatus(message, isError = false) {
+    const status = $("#users-status");
+    status.textContent = message;
+    status.classList.toggle("error", isError);
+  }
+
+  async function invokeUserManagement(body) {
+    const { data, error } = await supabaseClient.functions.invoke("manage-users", { body });
+    if (error) {
+      let message = error.message || "Could not complete user management request.";
+      if (error.context instanceof Response) {
+        try {
+          const responseData = await error.context.clone().json();
+          if (typeof responseData.error === "string") message = responseData.error;
+        } catch (parseError) {
+          console.error("Could not read the user-management error response.", parseError);
+        }
+      }
+      throw new Error(message);
+    }
+    if (data?.error) throw new Error(data.error);
+    return data;
+  }
+
+  function formatUserDate(value) {
+    if (!value) return "Never";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? "Unknown"
+      : new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(date);
+  }
+
+  function resetManagedUserForm() {
+    $("#user-form").reset();
+    $("#managed-user-id").value = "";
+    $("#user-form-title").textContent = "Invite a user";
+    $("#user-form-help").textContent = "They’ll receive an email invitation to set their password.";
+    $("#save-managed-user").textContent = "Send invitation";
+    $("#cancel-user-edit").hidden = true;
+    $("#managed-user-email").readOnly = false;
+    $("#managed-user-role").value = "staff";
+    $("#managed-user-role-field").hidden = cloudRole !== "owner";
+    $("#managed-user-role").querySelector('option[value="owner"]').hidden = true;
+    $("#managed-user-role").disabled = false;
+    setUsersStatus("");
+  }
+
+  function renderWorkspaceUsers() {
+    const body = $("#workspace-users");
+    body.replaceChildren();
+    $("#users-empty").hidden = workspaceUsers.length > 0;
+    workspaceUsers.forEach((user) => {
+      const row = document.createElement("tr");
+      const values = [
+        user.name || "—",
+        user.email || "—",
+        user.role.charAt(0).toUpperCase() + user.role.slice(1),
+        user.active ? "Active" : "Inactive",
+        formatUserDate(user.lastSignInAt)
+      ];
+      values.forEach((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      });
+      const actions = document.createElement("td");
+      actions.className = "user-row-actions";
+      const canManage = cloudRole === "owner" || user.role === "staff";
+      if (canManage) {
+        const editButton = document.createElement("button");
+        editButton.type = "button";
+        editButton.className = "button button-secondary";
+        editButton.textContent = "Edit";
+        editButton.addEventListener("click", () => editWorkspaceUser(user));
+        actions.append(editButton);
+        if (user.role !== "owner" && user.id !== cloudUser?.id) {
+          const activeButton = document.createElement("button");
+          activeButton.type = "button";
+          activeButton.className = "button button-secondary";
+          activeButton.textContent = user.active ? "Deactivate" : "Reactivate";
+          activeButton.addEventListener("click", () => setWorkspaceUserActive(user, !user.active));
+          actions.append(activeButton);
+        }
+      }
+      row.append(actions);
+      body.append(row);
+    });
+  }
+
+  async function loadWorkspaceUsers() {
+    if (!["owner", "admin"].includes(cloudRole)) {
+      setUsersStatus("Only workspace admins can manage users.", true);
+      return;
+    }
+    $("#users-refresh").disabled = true;
+    setUsersStatus("Loading workspace users…");
+    try {
+      const result = await invokeUserManagement({ action: "list" });
+      workspaceUsers = result.users;
+      renderWorkspaceUsers();
+      resetManagedUserForm();
+    } catch (error) {
+      console.error("Could not load workspace users.", error);
+      setUsersStatus(error.message, true);
+      workspaceUsers = [];
+      renderWorkspaceUsers();
+    } finally {
+      $("#users-refresh").disabled = false;
+    }
+  }
+
+  function editWorkspaceUser(user) {
+    if (cloudRole !== "owner" && user.role !== "staff") {
+      setUsersStatus("Admins can only edit staff accounts.", true);
+      return;
+    }
+    $("#managed-user-id").value = user.id;
+    $("#managed-user-name").value = user.name;
+    $("#managed-user-email").value = user.email;
+    $("#managed-user-role").value = user.role;
+    $("#managed-user-role-field").hidden = cloudRole !== "owner";
+    $("#managed-user-role").querySelector('option[value="owner"]').hidden = user.role !== "owner";
+    $("#managed-user-role").disabled = user.role === "owner";
+    $("#user-form-title").textContent = "Edit user";
+    $("#user-form-help").textContent = user.role === "owner"
+      ? "The owner role cannot be changed."
+      : "Changing an email address may require confirmation from the new address.";
+    $("#save-managed-user").textContent = "Save user";
+    $("#cancel-user-edit").hidden = false;
+    setUsersStatus("");
+    $("#managed-user-name").focus();
+  }
+
+  async function setWorkspaceUserActive(user, active) {
+    if (!window.confirm(`${active ? "Reactivate" : "Deactivate"} ${user.email}?`)) return;
+    try {
+      await invokeUserManagement({ action: "set-active", userId: user.id, active });
+      await loadWorkspaceUsers();
+      setUsersStatus(`User ${active ? "reactivated" : "deactivated"}.`);
+    } catch (error) {
+      console.error("Could not update workspace user status.", error);
+      setUsersStatus(error.message, true);
+    }
+  }
+
+  async function saveWorkspaceUser(event) {
+    event.preventDefault();
+    if (!["owner", "admin"].includes(cloudRole)) {
+      setUsersStatus("Only workspace admins can manage users.", true);
+      return;
+    }
+    const submit = $("#save-managed-user");
+    const userId = $("#managed-user-id").value;
+    const payload = {
+      name: $("#managed-user-name").value.trim(),
+      email: $("#managed-user-email").value.trim(),
+      role: cloudRole === "owner" ? $("#managed-user-role").value : "staff"
+    };
+    submit.disabled = true;
+    setUsersStatus(userId ? "Saving user changes…" : "Sending invitation…");
+    try {
+      const result = await invokeUserManagement(userId
+        ? { action: "update", userId, ...payload }
+        : { action: "invite", ...payload });
+      resetManagedUserForm();
+      const successMessage = userId
+        ? result.emailChangePending
+          ? "User updated. A confirmation email was sent to the new address."
+          : "User updated."
+        : "Invitation sent. The user must accept it to set a password.";
+      await loadWorkspaceUsers();
+      setUsersStatus(successMessage);
+    } catch (error) {
+      console.error("Could not save workspace user.", error);
+      setUsersStatus(error.message, true);
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
   function exportLocalBackup() {
     if (cloudDeployment) return;
     const backup = {
@@ -418,6 +600,14 @@
       cloudUser = user;
       setAuthStatus("Loading your online orders…");
       try {
+        const roleResult = await supabaseClient.from("workspace_user_roles")
+          .select("role").eq("user_id", user.id).maybeSingle();
+        if (roleResult.error) {
+          console.error("Could not load the workspace user role.", roleResult.error);
+          cloudRole = "staff";
+        } else {
+          cloudRole = roleResult.data?.role || "staff";
+        }
         await loadCloudData(true);
         $("#auth-gate").hidden = true;
         $("#app-shell").hidden = false;
@@ -445,6 +635,7 @@
     resetForm();
     setView("overview");
     cloudUser = null;
+    cloudRole = "staff";
     orders = [];
     drivers = [];
     showAuthGate("Sign in to load your shared online workspace.");
@@ -1104,13 +1295,18 @@
   }
 
   function setView(name) {
+    if (name === "users" && !["owner", "admin"].includes(cloudRole)) {
+      showToast("Only workspace admins can manage users.");
+      name = "overview";
+    }
     $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${name}-view`));
     $$("[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === name));
-    const labels = { overview: "Overview", orders: "All orders", history: "Order history", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
+    const labels = { overview: "Overview", orders: "All orders", history: "Order history", users: "Users", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
     $("#breadcrumb-current").textContent = labels[name] || "Overview";
     if (name === "orders") renderAllOrders();
     if (name === "history") renderHistory();
     if (name === "overview") renderOverview();
+    if (name === "users" && ["owner", "admin"].includes(cloudRole)) loadWorkspaceUsers();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -2218,6 +2414,9 @@
     $("#history-search").value = "";
     renderHistory();
   });
+  $("#user-form").addEventListener("submit", saveWorkspaceUser);
+  $("#users-refresh").addEventListener("click", loadWorkspaceUsers);
+  $("#cancel-user-edit").addEventListener("click", resetManagedUserForm);
   $$("[data-category]").forEach((button) => button.addEventListener("click", () => {
     if (button.dataset.category === "Converter" && $("#new-order-view").classList.contains("active")) {
       converterPinnedOpen = true;
@@ -2364,6 +2563,7 @@
     $("#app-shell").hidden = false;
     $("#auth-gate").hidden = true;
     $("#sign-out").hidden = !cloudDeployment;
+    $("#users-nav-link").hidden = !cloudDeployment || !["owner", "admin"].includes(cloudRole);
     $("#export-data").hidden = cloudDeployment;
     $("#import-data").hidden = !cloudDeployment;
     $("#storage-description").textContent = cloudDeployment

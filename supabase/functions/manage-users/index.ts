@@ -105,6 +105,7 @@ Deno.serve(async (request) => {
       }
       const role = body.role;
       const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
+        redirectTo: "https://ahmedgurey07.github.io/transfers/",
         data: { display_name: name }
       });
       if (error) throw error;

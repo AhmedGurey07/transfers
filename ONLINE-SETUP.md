@@ -36,10 +36,6 @@ The schema also creates the public `profile-photos` Storage bucket. Signed-in us
 
 The Supabase URL and anon/publishable key are browser-visible identifiers, not privileged secrets. Row-level security protects the role table so users can only read their own role. The Users page is available to owners and admins. Admins can invite and manage staff; only the owner can grant or remove admin access. Users can open their profile from the top-right avatar to change their username, password, or photo. Password changes are self-service.
 
-## Converter updates
-
-The order builder's **Live source converter** tab embeds `https://ahmedgurey07.github.io/convertor/` directly. Publish updates to the `convertor` repository and they appear in this tab when its GitHub Pages site updates. **Quick add to order** remains the built-in converter that inserts calculated quantities into an order.
-
 ## Existing browser data
 
 The first sign-in on each browser imports its saved orders that are not already online; existing online records win if an order ID already exists. Saved drivers are added if their names are not already present. Keep the old browser data until you verify the migrated orders on the online site.

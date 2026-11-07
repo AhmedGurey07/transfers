@@ -1787,16 +1787,6 @@
     $("#toggle-converter").textContent = converterPinnedOpen ? "Hide area converter" : "Use area converter";
   }
 
-  function setConverterTab(tab) {
-    const showLive = tab === "live";
-    $("#quick-converter-panel").hidden = showLive;
-    $("#live-converter-panel").hidden = !showLive;
-    $("#quick-converter-tab").classList.toggle("active", !showLive);
-    $("#live-converter-tab").classList.toggle("active", showLive);
-    $("#quick-converter-tab").setAttribute("aria-selected", String(!showLive));
-    $("#live-converter-tab").setAttribute("aria-selected", String(showLive));
-  }
-
   function addConversionToOrder() {
     const items = converterItems();
     if (!items.length) return;
@@ -2650,8 +2640,6 @@
   $("#converter-mode").addEventListener("change", updateConverter);
   $("#converter-area").addEventListener("input", updateConverter);
   $("#add-conversion").addEventListener("click", addConversionToOrder);
-  $("#quick-converter-tab").addEventListener("click", () => setConverterTab("quick"));
-  $("#live-converter-tab").addEventListener("click", () => setConverterTab("live"));
   $("#toggle-converter").addEventListener("click", () => {
     converterPinnedOpen = !converterPinnedOpen;
     updateConverterVisibility();

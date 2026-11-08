@@ -64,26 +64,21 @@
         <a class="nav-link active" href="#overview" data-view="overview"><span class="nav-icon">⌂</span> Overview</a>
         <a class="nav-link" href="#orders" data-view="orders"><span class="nav-icon">▤</span> All orders <span class="nav-count" id="nav-order-count">0</span></a>
         <a class="nav-link" href="#history" data-view="history"><span class="nav-icon">◷</span> Order history</a>
+        <a class="nav-link" href="#transfer-history" data-view="transfer-history"><span class="nav-icon">↔</span> Transfer history</a>
+        <a class="nav-link" href="#item-history" data-view="item-history"><span class="nav-icon">▤</span> Item history</a>
         <a class="nav-link" href="#new-order" data-view="new-order"><span class="nav-icon">＋</span> Create an order</a>
         <a class="nav-link" href="#catalog" data-view="catalog"><span class="nav-icon">▦</span> Product catalog</a>
         <a class="nav-link" href="#users" data-view="users" id="users-nav-link" hidden><span class="nav-icon">♙</span> Users</a>
       </nav>
 
-      <div class="nav-label category-label">ORDER FORMS</div>
-      <nav class="navigation category-nav" aria-label="Order form categories">
-        <button class="nav-link category-link" type="button" data-category="Tiles & marble"><span class="category-dot dot-stone"></span> Tiles &amp; marble</button>
-        <button class="nav-link category-link" type="button" data-category="Doors & mirrors"><span class="category-dot dot-wood"></span> Doors &amp; mirrors</button>
-        <button class="nav-link category-link" type="button" data-category="Plumbing"><span class="category-dot dot-water"></span> Plumbing</button>
-        <button class="nav-link category-link" type="button" data-category="Electrical & decoration"><span class="category-dot dot-electric"></span> Electrical &amp; decoration</button>
-        <button class="nav-link category-link" type="button" data-category="Gypsum & boards"><span class="category-dot dot-board"></span> Gypsum &amp; boards</button>
-        <button class="nav-link category-link" type="button" data-category="Shower glass"><span class="category-dot dot-glass"></span> Shower glass</button>
-        <button class="nav-link category-link" type="button" data-category="Lighting & cables"><span class="category-dot dot-light"></span> Lighting &amp; cables</button>
-        <button class="nav-link category-link" type="button" data-category="General order"><span class="category-dot dot-general"></span> General order</button>
-        <button class="nav-link category-link" type="button" data-category="Converter"><span class="category-dot dot-converter"></span> Converter</button>
-      </nav>
-
       <div class="sidebar-bottom">
-        <div class="sidebar-note"><span class="online-dot"></span><span><strong>All caught up</strong><small>Your orders are saved on this device.</small></span></div>
+        <div class="sidebar-account">
+          <button class="sidebar-account-profile" id="sidebar-account-profile" type="button" aria-label="Open your profile">
+            <span class="sidebar-account-avatar"><span id="sidebar-avatar-initials">AG</span><img id="sidebar-avatar-image" alt="" hidden></span>
+            <span class="sidebar-account-details"><strong id="sidebar-account-name">Workspace user</strong><small id="sidebar-account-id">Signed in</small></span>
+          </button>
+          <button class="sidebar-logout" id="sign-out" type="button" aria-label="Log out" title="Log out">↪</button>
+        </div>
         <div class="sidebar-footer">A simpler way to keep business moving.</div>
       </div>
     </aside>
@@ -91,12 +86,12 @@
     <main class="main-content">
       <header class="topbar">
         <div class="breadcrumb"><span>Workspace</span><span class="crumb-slash">/</span><strong id="breadcrumb-current">Overview</strong></div>
-        <div class="topbar-actions"><span class="today-label" id="today-label"></span><button class="button button-secondary sign-out-button" id="sign-out" type="button">Sign out</button><button class="avatar" id="account-avatar" type="button" aria-label="Open your profile"><span id="account-avatar-initials">AG</span><img id="account-avatar-image" alt="" hidden></button></div>
+        <div class="topbar-actions"><span class="today-label" id="today-label"></span><button class="avatar" id="account-avatar" type="button" aria-label="Open your profile"><span id="account-avatar-initials">AG</span><img id="account-avatar-image" alt="" hidden></button></div>
       </header>
 
       <section class="view active" id="overview-view" aria-labelledby="welcome-title">
         <div class="welcome-row">
-          <div><p class="eyebrow">YOUR BUSINESS AT A GLANCE</p><h1 id="welcome-title">Good day, Ahmed <span class="wave">✳</span></h1><p class="welcome-copy">Keep every order organized, from the first item to the final delivery.</p></div>
+          <div><p class="eyebrow">YOUR BUSINESS AT A GLANCE</p><h1 id="welcome-title"><span id="welcome-greeting">Good day</span>, <span id="welcome-user">Ahmed</span> <span class="wave">✳</span></h1><p class="welcome-copy">Keep every order organized, from the first item to the final delivery.</p></div>
           <div class="overview-actions">
             <button class="button button-secondary" type="button" id="upload-order-pdf">Upload order PDF</button>
             <button class="button button-secondary" type="button" id="export-data" hidden>Export orders for online use</button>
@@ -122,14 +117,6 @@
           <div class="empty-state" id="recent-empty"><span class="empty-icon">▤</span><strong>No orders yet</strong><span>Your saved orders will show up here.</span><button class="button button-secondary" type="button" data-action="new-order">Create your first order</button></div>
         </div>
 
-        <div class="section-heading forms-heading"><div><p class="eyebrow">MADE FOR YOUR BUSINESS</p><h2>Start with a form</h2></div></div>
-        <div class="form-shortcuts">
-          <button class="shortcut-card" type="button" data-category="Tiles & marble"><span class="shortcut-icon shortcut-stone">▧</span><span><strong>Tiles &amp; marble</strong><small>Marble, tiles &amp; samples</small></span><span class="shortcut-arrow">↗</span></button>
-          <button class="shortcut-card" type="button" data-category="Doors & mirrors"><span class="shortcut-icon shortcut-wood">▥</span><span><strong>Doors &amp; mirrors</strong><small>Doors, handles &amp; mirrors</small></span><span class="shortcut-arrow">↗</span></button>
-          <button class="shortcut-card" type="button" data-category="Plumbing"><span class="shortcut-icon shortcut-water">⌁</span><span><strong>Plumbing</strong><small>Fittings &amp; accessories</small></span><span class="shortcut-arrow">↗</span></button>
-          <button class="shortcut-card" type="button" data-category="Electrical & decoration"><span class="shortcut-icon shortcut-electric">✳</span><span><strong>Electrical &amp; decoration</strong><small>Lighting &amp; finishing</small></span><span class="shortcut-arrow">↗</span></button>
-          <button class="shortcut-card" type="button" data-category="Converter"><span class="shortcut-icon shortcut-converter">↔</span><span><strong>Converter</strong><small>Tiles &amp; gypsum calculator</small></span><span class="shortcut-arrow">↗</span></button>
-        </div>
       </section>
 
       <section class="view" id="orders-view" aria-labelledby="orders-title">
@@ -139,10 +126,17 @@
       </section>
 
       <section class="view" id="catalog-view" aria-labelledby="catalog-title">
-        <div class="page-heading"><div><p class="eyebrow">WAREHOUSE WORKBOOK</p><h1 id="catalog-title">Product catalog</h1><p class="welcome-copy">Products and quantities loaded from the warehouse Excel workbook.</p></div><div class="catalog-actions"><button class="button button-secondary" type="button" id="upload-workbook">Upload Excel workbook</button><input id="workbook-file" type="file" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" hidden><span class="item-count"><span id="catalog-view-count">0</span> products</span></div></div>
+        <div class="page-heading"><div><p class="eyebrow">WAREHOUSE WORKBOOK</p><h1 id="catalog-title">Product catalog</h1><p class="welcome-copy">Products and quantities loaded from the warehouse Excel workbook.</p></div><div class="catalog-actions"><button class="button button-secondary" type="button" id="add-catalog-product">Add product</button><button class="button button-secondary" type="button" id="export-catalog">Export Excel</button><button class="button button-secondary" type="button" id="upload-workbook">Upload Excel workbook</button><input id="workbook-file" type="file" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" hidden><span class="item-count"><span id="catalog-view-count">0</span> products</span></div></div>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="catalog-search" type="search" placeholder="Search product, code, unit, or quantity" aria-label="Search product catalog"></label></div>
+        <div class="catalog-filter-panel" id="catalog-filter-panel" aria-label="Catalog filters">
+          <div class="catalog-filter-fields">
+            <label><span>R/QUANTITY</span><div><select data-catalog-filter-operator="rQuantities"><option value="=">=</option><option value="!=">≠</option><option value=">">&gt;</option><option value=">=">&ge;</option><option value="<">&lt;</option><option value="<=">&le;</option></select><input data-catalog-filter-value="rQuantities" type="number" step="any" placeholder="Any"></div></label>
+            <label><span>STS</span><select data-catalog-filter-input="statuses"><option value="">All statuses</option><option value="END">END</option><option value="DONE">DONE</option></select></label>
+          </div>
+          <div class="catalog-filter-actions"><button class="button button-primary" type="button" id="catalog-filter-apply">Apply</button><button class="button button-quiet" type="button" id="catalog-filter-cancel">Cancel</button></div>
+        </div>
         <form class="catalog-edit-form panel" id="catalog-edit-form" hidden>
-          <div class="panel-heading"><div><div><h2>Edit catalog product</h2><p>Update every warehouse column. Separate multiple values with commas.</p></div></div></div>
+          <div class="panel-heading"><div><div><h2 id="catalog-edit-title">Edit catalog product</h2><p>Update every warehouse column. Separate multiple values with commas.</p></div></div></div>
           <div class="field-grid">
             <label class="field field-wide"><span>Product / description <i>*</i></span><input id="catalog-edit-product" required maxlength="200"></label>
             <label class="field"><span>Quantity</span><input id="catalog-edit-quantities" placeholder="e.g. 20"></label>
@@ -155,6 +149,15 @@
           </div>
           <div class="form-actions"><span class="auth-status" id="catalog-edit-status" role="status" aria-live="polite"></span><div><button class="button button-quiet" type="button" id="catalog-edit-cancel">Cancel</button><button class="button button-primary" type="submit">Save product</button></div></div>
         </form>
+        <form class="catalog-adjust-form panel" id="catalog-adjust-form" hidden>
+          <div class="panel-heading"><div><div><h2>Adjust product quantity</h2><p id="catalog-adjust-product-label"></p></div></div></div>
+          <div class="field-grid">
+            <label class="field"><span>Amount <i>*</i></span><input id="catalog-adjust-amount" type="number" min="0.01" step="any" required></label>
+            <label class="field"><span>Date <i>*</i></span><input id="catalog-adjust-date" type="date" required></label>
+            <label class="field field-wide"><span>Reason <i>*</i></span><input id="catalog-adjust-reason" maxlength="200" required></label>
+          </div>
+          <div class="form-actions"><span class="auth-status" id="catalog-adjust-status" role="status" aria-live="polite"></span><div><button class="button button-quiet" type="button" id="catalog-adjust-cancel">Cancel</button><button class="button button-primary" id="catalog-adjust-submit" type="submit">Save adjustment</button></div></div>
+        </form>
         <div class="table-card"><div class="table-scroll"><table><thead><tr id="catalog-headings"></tr></thead><tbody id="catalog-products"></tbody></table></div><div class="empty-state" id="catalog-empty" hidden><span class="empty-icon">⌕</span><strong>No matching products</strong><span>Try a different product name, code, quantity, or unit.</span></div></div>
       </section>
 
@@ -162,6 +165,18 @@
         <div class="page-heading"><div><p class="eyebrow">ORDER AUDIT TRAIL</p><h1 id="history-title">Order history</h1><p class="welcome-copy">Review order creation, edits, status changes, and deletions.</p></div><button class="button button-secondary" type="button" id="history-show-all">Show all history</button></div>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="history-search" type="search" placeholder="Search order, customer, or activity" aria-label="Search order history"></label><span id="history-filter-label" class="history-filter-label"></span></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th>WHEN</th><th>ORDER</th><th>CUSTOMER</th><th>ACTIVITY</th></tr></thead><tbody id="order-history"></tbody></table></div><div class="empty-state" id="history-empty"><span class="empty-icon">◷</span><strong>No history yet</strong><span>Order activity will appear here.</span></div></div>
+      </section>
+
+      <section class="view" id="transfer-history-view" aria-labelledby="transfer-history-title">
+        <div class="page-heading"><div><p class="eyebrow">WAREHOUSE QUANTITY AUDIT</p><h1 id="transfer-history-title">Transfer history</h1><p class="welcome-copy">See how every saved transfer changed the product quantities.</p></div></div>
+        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="transfer-history-search" type="search" placeholder="Search transfer, product, or customer" aria-label="Search transfer history"></label><label class="date-filter-field">DATE<input id="transfer-history-date" type="date" aria-label="Filter transfer history by date"></label><button class="button button-quiet" type="button" id="transfer-history-clear-date">Clear date</button></div>
+        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>WHEN</th><th>TRANSFER</th><th>CUSTOMER</th><th>PRODUCT ID</th><th>ORDERED</th><th>TAKEN</th><th>R/QUANTITY</th><th>UOM/N</th><th>STS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="transfer-history"></tbody></table></div><div class="empty-state" id="transfer-history-empty"><span class="empty-icon">↔</span><strong>No transfer history yet</strong><span>Saved transfers that update catalog quantities will appear here.</span></div></div>
+      </section>
+
+      <section class="view" id="item-history-view" aria-labelledby="item-history-title">
+        <div class="page-heading"><div><p class="eyebrow">RECENT PRODUCT MOVEMENT</p><h1 id="item-history-title">Item history</h1><p class="welcome-copy">Review item transfers created today and yesterday.</p></div></div>
+        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="item-history-search" type="search" placeholder="Search reference, product, customer, or branch" aria-label="Search item history"></label></div>
+        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>REFERENCE</th><th>PRODUCT</th><th>FROM</th><th>TO</th><th>QUANTITY</th><th>UNIT</th></tr></thead><tbody id="item-history"></tbody></table></div><div class="empty-state" id="item-history-empty"><span class="empty-icon">▤</span><strong>No item history yet</strong><span>Saved transfer items will appear here.</span></div></div>
       </section>
 
       <section class="view" id="users-view" aria-labelledby="users-title">
@@ -223,7 +238,7 @@
       </section>
 
       <section class="view" id="new-order-view" aria-labelledby="order-form-title">
-        <div class="page-heading form-page-heading"><div><p class="eyebrow">ORDER BUILDER <span class="heading-dot">·</span> <span id="order-id-label">NEW ORDER</span></p><h1 id="order-form-title">Create an order</h1><p class="welcome-copy">Fill in the details below, then preview and print your order.</p></div><div class="order-navigation"><button class="button button-quiet" type="button" id="previous-order" aria-label="Open previous order" hidden>← Previous</button><button class="button button-quiet" type="button" id="next-order" aria-label="Open next order" hidden>Next →</button><button class="button button-quiet" type="button" data-action="cancel-order">← Back to overview</button></div></div>
+        <div class="page-heading form-page-heading"><div><p class="eyebrow">ORDER BUILDER <span class="heading-dot">·</span> <span id="order-id-label">NEW ORDER</span></p><h1 id="order-form-title">Create an order</h1><p class="welcome-copy">Fill in the details below, then preview and print your order.</p></div><div class="order-navigation"><button class="button button-secondary" type="button" id="upload-order-pdf-form">Upload order PDF</button><button class="button button-quiet" type="button" id="previous-order" aria-label="Open previous order" hidden>← Previous</button><button class="button button-quiet" type="button" id="next-order" aria-label="Open next order" hidden>Next →</button><button class="button button-quiet" type="button" data-action="cancel-order">← Back to overview</button></div></div>
         <form id="order-form">
           <div class="builder-layout">
             <div class="builder-main">

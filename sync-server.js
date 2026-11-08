@@ -11,7 +11,8 @@ const calculatorPath = "C:\\Users\\User\\OneDrive\\Desktop\\AHMED FOLDER\\calcul
 const additionalConverterPath = "C:\\Users\\User\\OneDrive\\Desktop\\lessons\\calculator\\60x6046crt.html";
 const sourceReader = path.join(root, "read-sources.ps1");
 const port = Number(process.env.PORT) || 8765;
-const hiddenFiles = new Set(["read-sources.ps1", "sync-server.js", "start order desk.cmd"]);
+const hiddenFiles = new Set(["read-sources.ps1", "write-sources.ps1", "sync-server.js", "start order desk.cmd"]);
+const writerScript = path.join(root, "write-sources.ps1");
 let sourceData = null;
 let sourceError = "";
 let goodSourceStamp = "";
@@ -134,7 +135,7 @@ function contentType(filePath) {
 
 const server = http.createServer(async (request, response) => {
   const requestUrl = new URL(request.url, `http://127.0.0.1:${port}`);
-  if (request.method === "OPTIONS" && ["/api/data", "/api/refresh", "/api/upload-workbook"].includes(requestUrl.pathname)) {
+  if (request.method === "OPTIONS" && ["/api/data", "/api/refresh", "/api/upload-workbook", "/api/write-workbook"].includes(requestUrl.pathname)) {
     response.writeHead(204, {
       "Access-Control-Allow-Origin": "null",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -169,6 +170,44 @@ const server = http.createServer(async (request, response) => {
     } catch (error) {
       sendJson(request, response, 503, { ok: false, error: error.message });
     }
+    return;
+  }
+  if (requestUrl.pathname === "/api/write-workbook" && request.method === "POST") {
+    const maxPayloadSize = 10 * 1024 * 1024;
+    const chunks = [];
+    let received = 0;
+    request.on("data", (chunk) => {
+      received += chunk.length;
+      if (received > maxPayloadSize) {
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("end", async () => {
+      const payloadPath = path.join(root, `.catalog-update-${process.pid}.json`);
+      try {
+        const body = Buffer.concat(chunks).toString("utf8");
+        const parsed = JSON.parse(body);
+        await fs.promises.writeFile(payloadPath, JSON.stringify(parsed), "utf8");
+        await new Promise((resolve, reject) => execFile("powershell.exe", [
+          "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", writerScript
+        ], {
+          windowsHide: true,
+          maxBuffer: 4 * 1024 * 1024,
+          env: { ...process.env, ORDER_DESK_WORKBOOK_PATH: activeWorkbookPath, ORDER_DESK_CATALOG_PAYLOAD: payloadPath }
+        }, (error, stdout, stderr) => error
+          ? reject(new Error((stderr || error.message).trim()))
+          : resolve(stdout)));
+        await refreshSources(true);
+        if (!sourceData || sourceError) throw new Error(sourceError || "The workbook was saved but could not be read back.");
+        sendJson(request, response, 200, { ok: true, data: sourceData });
+      } catch (error) {
+        sendJson(request, response, 500, { ok: false, error: error.message || "Could not update the Excel workbook." });
+      } finally {
+        try { await fs.promises.unlink(payloadPath); } catch {}
+      }
+    });
     return;
   }
   if (requestUrl.pathname === "/api/upload-workbook" && request.method === "POST") {

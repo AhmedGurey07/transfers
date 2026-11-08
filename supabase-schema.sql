@@ -11,6 +11,12 @@ create table if not exists public.drivers (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.workspace_catalog (
+  catalog_key text primary key default 'default',
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.workspace_user_roles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   role text not null check (role in ('owner', 'admin', 'staff')) default 'staff',
@@ -23,6 +29,7 @@ create unique index if not exists workspace_user_roles_single_owner
 
 alter table public.orders enable row level security;
 alter table public.drivers enable row level security;
+alter table public.workspace_catalog enable row level security;
 alter table public.workspace_user_roles enable row level security;
 
 drop policy if exists "Authenticated workspace access" on public.orders;
@@ -41,8 +48,17 @@ create policy "Authenticated workspace access"
   using (true)
   with check (true);
 
+drop policy if exists "Authenticated workspace access" on public.workspace_catalog;
+create policy "Authenticated workspace access"
+  on public.workspace_catalog
+  for all
+  to authenticated
+  using (true)
+  with check (true);
+
 grant select, insert, update, delete on public.orders to authenticated;
 grant select, insert, update, delete on public.drivers to authenticated;
+grant select, insert, update, delete on public.workspace_catalog to authenticated;
 grant select on public.workspace_user_roles to authenticated;
 
 drop policy if exists "Users can read their own workspace role" on public.workspace_user_roles;

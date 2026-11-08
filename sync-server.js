@@ -6,6 +6,7 @@ const { execFile } = require("node:child_process");
 
 const root = __dirname;
 const workbookPath = "C:\\Users\\User\\OneDrive\\Desktop\\Ware house 200 last update 04-07-2026.xlsm";
+let activeWorkbookPath = workbookPath;
 const calculatorPath = "C:\\Users\\User\\OneDrive\\Desktop\\AHMED FOLDER\\calculator";
 const additionalConverterPath = "C:\\Users\\User\\OneDrive\\Desktop\\lessons\\calculator\\60x6046crt.html";
 const sourceReader = path.join(root, "read-sources.ps1");
@@ -18,7 +19,7 @@ let attemptedSourceStamp = "";
 let refreshInProgress = null;
 
 function getSourceStamp() {
-  const files = [workbookPath, additionalConverterPath, ...fs.readdirSync(calculatorPath)
+  const files = [activeWorkbookPath, additionalConverterPath, ...fs.readdirSync(calculatorPath)
     .filter((name) => name.toLowerCase().endsWith(".html"))
     .map((name) => path.join(calculatorPath, name))];
   return files.map((file) => {
@@ -31,7 +32,11 @@ function readSourceData() {
   return new Promise((resolve, reject) => {
     execFile("powershell.exe", [
       "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", sourceReader
-    ], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+    ], {
+      windowsHide: true,
+      maxBuffer: 16 * 1024 * 1024,
+      env: { ...process.env, ORDER_DESK_WORKBOOK_PATH: activeWorkbookPath }
+    }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error((stderr || error.message).trim()));
         return;
@@ -44,9 +49,12 @@ function readSourceData() {
         data.products = data.products.map((item) => ({
           product: Buffer.from(item.productBase64, "base64").toString("utf8"),
           unit: Buffer.from(item.unitBase64, "base64").toString("utf8"),
+          quantities: (item.quantitiesBase64 || []).map((value) => Buffer.from(value, "base64").toString("utf8")),
           qtyItems: item.qtyItemsBase64.map((value) => Buffer.from(value, "base64").toString("utf8")),
+          taken: (item.takenBase64 || []).map((value) => Buffer.from(value, "base64").toString("utf8")),
           rQuantities: item.rQuantitiesBase64.map((value) => Buffer.from(value, "base64").toString("utf8")),
-          uomNs: item.uomNsBase64.map((value) => Buffer.from(value, "base64").toString("utf8"))
+          uomNs: item.uomNsBase64.map((value) => Buffer.from(value, "base64").toString("utf8")),
+          statuses: (item.statusesBase64 || []).map((value) => Buffer.from(value, "base64").toString("utf8"))
         }));
         if (!data.products.length) {
           throw new Error("The source reader returned incomplete catalog or converter data.");
@@ -126,7 +134,7 @@ function contentType(filePath) {
 
 const server = http.createServer(async (request, response) => {
   const requestUrl = new URL(request.url, `http://127.0.0.1:${port}`);
-  if (request.method === "OPTIONS" && ["/api/data", "/api/refresh"].includes(requestUrl.pathname)) {
+  if (request.method === "OPTIONS" && ["/api/data", "/api/refresh", "/api/upload-workbook"].includes(requestUrl.pathname)) {
     response.writeHead(204, {
       "Access-Control-Allow-Origin": "null",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -161,6 +169,51 @@ const server = http.createServer(async (request, response) => {
     } catch (error) {
       sendJson(request, response, 503, { ok: false, error: error.message });
     }
+    return;
+  }
+  if (requestUrl.pathname === "/api/upload-workbook" && request.method === "POST") {
+    const maxWorkbookSize = 25 * 1024 * 1024;
+    const contentLength = Number(request.headers["content-length"] || 0);
+    if (!Number.isFinite(contentLength) || contentLength <= 0 || contentLength > maxWorkbookSize) {
+      sendJson(request, response, 413, { ok: false, error: "Choose an Excel workbook smaller than 25 MB." });
+      return;
+    }
+    const chunks = [];
+    let received = 0;
+    let rejected = false;
+    request.on("data", (chunk) => {
+      received += chunk.length;
+      if (received > maxWorkbookSize) {
+        rejected = true;
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("error", (error) => {
+      if (!rejected) sendJson(request, response, 400, { ok: false, error: `Could not receive the workbook: ${error.message}` });
+    });
+    request.on("end", async () => {
+      if (rejected) return;
+      const uploadDirectory = path.join(root, ".uploaded-sources");
+      const uploadedPath = path.join(uploadDirectory, "warehouse-workbook.xlsm");
+      const temporaryPath = `${uploadedPath}.uploading`;
+      try {
+        await fs.promises.mkdir(uploadDirectory, { recursive: true });
+        await fs.promises.writeFile(temporaryPath, Buffer.concat(chunks));
+        await fs.promises.rename(temporaryPath, uploadedPath);
+        activeWorkbookPath = uploadedPath;
+        await refreshSources(true);
+        if (!sourceData || sourceError) {
+          sendJson(request, response, 503, { ok: false, error: sourceError || "The uploaded workbook could not be read." });
+          return;
+        }
+        sendJson(request, response, 200, { ok: true, data: sourceData });
+      } catch (error) {
+        try { await fs.promises.unlink(temporaryPath); } catch {}
+        sendJson(request, response, 500, { ok: false, error: error.message || "Could not save the uploaded workbook." });
+      }
+    });
     return;
   }
   if (request.method !== "GET" && request.method !== "HEAD") {

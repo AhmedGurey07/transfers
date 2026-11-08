@@ -108,6 +108,7 @@
     || new URLSearchParams(location.search).get("type") === "invite";
   let invitedSignupUser = null;
   let profilePreviewUrl = "";
+  let editingCatalogIndex = -1;
   function indexProductCatalog() {
     productsByName.clear();
     productsByPdfName.clear();
@@ -136,33 +137,235 @@
       return option;
     }));
     $("#catalog-count").textContent = productCatalog.length.toLocaleString("en");
+    renderCatalogFilterOptions();
     renderProductCatalogTable();
   }
 
   function renderProductCatalogTable() {
     const query = $("#catalog-search").value.trim().toLocaleLowerCase();
-    const filtered = productCatalog.filter((item) =>
-      `${item.product} ${(item.qtyItems || []).join(" ")} ${(item.rQuantities || []).join(" ")} ${(item.uomNs || []).join(" ")} ${item.unit}`
-        .toLocaleLowerCase().includes(query)
-    );
+    const filterFields = [
+      ["product", "PRODUCT"], ["quantities", "QUANTITY"], ["qtyItems", "Q/ITEM"],
+      ["taken", "TAKEN"], ["rQuantities", "R/QUANTITY"], ["uomNs", "UOM/N"],
+      ["unit", "UOM"], ["statuses", "STS"]
+    ];
+    const headings = $("#catalog-headings");
+    headings.replaceChildren(...filterFields.map(([field, label]) => {
+      const heading = document.createElement("th");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "catalog-filter-button";
+      button.innerHTML = `${label}<span aria-hidden="true">▼</span>`;
+      button.classList.toggle("active", catalogValueFilters[field]?.size > 0);
+      button.addEventListener("click", () => openCatalogFilterMenu(heading, field, label));
+      heading.append(button);
+      return heading;
+    }), Object.assign(document.createElement("th"), { innerHTML: '<span class="sr-only">Actions</span>' }));
+    const filtered = productCatalog.filter((item) => {
+      const matchesSearch = `${item.product} ${(item.quantities || []).join(" ")} ${(item.qtyItems || []).join(" ")} ${(item.taken || []).join(" ")} ${(item.rQuantities || []).join(" ")} ${(item.uomNs || []).join(" ")} ${(item.statuses || []).join(" ")} ${item.unit}`
+        .toLocaleLowerCase().includes(query);
+      if (!matchesSearch) return false;
+      return filterFields.every(([field]) => {
+        const selected = catalogValueFilters[field];
+        if (!selected || !selected.size) return true;
+        const values = Array.isArray(item[field]) ? item[field] : [item[field]];
+        return values.some((value) => selected.has(String(value || "—")));
+      });
+    });
     const target = $("#catalog-products");
     target.replaceChildren(...filtered.map((item) => {
       const row = document.createElement("tr");
       const product = document.createElement("td");
       product.textContent = item.product;
+      const quantity = document.createElement("td");
+      quantity.textContent = (item.quantities || []).join(", ") || "—";
       const qtyItem = document.createElement("td");
       qtyItem.textContent = item.qtyItems.length ? item.qtyItems.join(", ") : "—";
+      const taken = document.createElement("td");
+      taken.textContent = (item.taken || []).join(", ") || "—";
       const rQuantity = document.createElement("td");
       rQuantity.textContent = item.rQuantities?.length ? item.rQuantities.join(", ") : "—";
       const uomN = document.createElement("td");
       uomN.textContent = item.uomNs?.length ? item.uomNs.join(", ") : "—";
       const unit = document.createElement("td");
       unit.textContent = item.unit;
-      row.append(product, qtyItem, rQuantity, uomN, unit);
+      const status = document.createElement("td");
+      status.textContent = (item.statuses || []).join(", ") || "—";
+      const actions = document.createElement("td");
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "order-action-button";
+      edit.textContent = "Edit";
+      edit.addEventListener("click", () => beginCatalogEdit(productCatalog.indexOf(item)));
+      actions.append(edit);
+      row.append(product, quantity, qtyItem, taken, rQuantity, uomN, unit, status, actions);
       return row;
     }));
     $("#catalog-view-count").textContent = filtered.length.toLocaleString("en");
     $("#catalog-empty").hidden = filtered.length > 0;
+  }
+
+  const catalogValueFilters = {};
+
+  function catalogFieldValues(field) {
+    return [...new Set(productCatalog.map((item) => {
+      const values = Array.isArray(item[field]) ? item[field] : [item[field]];
+      return values.map((value) => String(value || "—"));
+    }).flat())].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+  }
+
+  function openCatalogFilterMenu(heading, field, label) {
+    $$(".catalog-filter-menu").forEach((menu) => menu.remove());
+    const menu = document.createElement("div");
+    menu.className = "catalog-filter-menu";
+    const search = document.createElement("input");
+    search.type = "search";
+    search.placeholder = `Search ${label.toLowerCase()}`;
+    const values = catalogFieldValues(field);
+    const selected = new Set(catalogValueFilters[field] || values);
+    const list = document.createElement("div");
+    list.className = "catalog-filter-values";
+    const renderValues = () => {
+      list.replaceChildren(...values.filter((value) =>
+        value.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())
+      ).map((value) => {
+        const labelElement = document.createElement("label");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = value;
+        checkbox.checked = selected.has(value);
+        checkbox.addEventListener("change", () => checkbox.checked ? selected.add(value) : selected.delete(value));
+        labelElement.append(checkbox, document.createTextNode(value));
+        return labelElement;
+      }));
+    };
+    const selectAll = document.createElement("button");
+    selectAll.type = "button";
+    selectAll.textContent = "Select all";
+    selectAll.addEventListener("click", () => { values.forEach((value) => selected.add(value)); renderValues(); });
+    const clearAll = document.createElement("button");
+    clearAll.type = "button";
+    clearAll.textContent = "Clear all";
+    clearAll.addEventListener("click", () => { selected.clear(); renderValues(); });
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "button-primary";
+    apply.textContent = "Apply";
+    apply.addEventListener("click", () => {
+      catalogValueFilters[field] = selected.size === values.length ? new Set() : selected;
+      menu.remove();
+      renderProductCatalogTable();
+    });
+    const actions = document.createElement("div");
+    actions.className = "catalog-filter-actions";
+    actions.append(selectAll, clearAll, apply);
+    menu.append(search, list, actions);
+    heading.append(menu);
+    search.addEventListener("input", renderValues);
+    renderValues();
+    search.focus();
+  }
+
+  function splitCatalogValues(value) {
+    return String(value || "").split(",").map((entry) => entry.trim()).filter(Boolean);
+  }
+
+  function catalogUomValues() {
+    return [...new Set(productCatalog.map((item) => String(item.unit || "").trim()).filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+  }
+
+  function renderCatalogFilterOptions() {
+    const target = $("[data-catalog-filter='unit']");
+    if (!target) return;
+    const selected = target.value;
+    target.replaceChildren(new Option("All UOM", ""), ...catalogUomValues().map((unit) => new Option(unit, unit)));
+    target.value = catalogUomValues().includes(selected) ? selected : "";
+  }
+
+  function renderCatalogUomOptions(selected = "") {
+    const target = $("#catalog-edit-unit");
+    const values = catalogUomValues();
+    target.replaceChildren(...values.map((unit) => {
+      const option = document.createElement("option");
+      option.value = unit;
+      option.textContent = unit;
+      option.selected = unit === selected;
+      return option;
+    }));
+    target.value = values.includes(selected) ? selected : "";
+  }
+
+  function beginCatalogEdit(index) {
+    const item = productCatalog[index];
+    if (!item) return;
+    editingCatalogIndex = index;
+    $("#catalog-edit-product").value = item.product;
+    $("#catalog-edit-quantities").value = (item.quantities || []).join(", ");
+    $("#catalog-edit-qty-items").value = (item.qtyItems || []).join(", ");
+    $("#catalog-edit-taken").value = (item.taken || []).join(", ");
+    $("#catalog-edit-r-quantities").value = (item.rQuantities || []).join(", ");
+    $("#catalog-edit-uom-ns").value = (item.uomNs || []).join(", ");
+    renderCatalogUomOptions(item.unit);
+    $("#catalog-edit-statuses").value = (item.statuses || []).join(", ");
+    $("#catalog-edit-status").textContent = "";
+    $("#catalog-edit-status").classList.remove("error");
+    $("#catalog-edit-form").hidden = false;
+    $("#catalog-edit-product").focus();
+  }
+
+  function closeCatalogEdit() {
+    editingCatalogIndex = -1;
+    $("#catalog-edit-form").hidden = true;
+    $("#catalog-edit-status").textContent = "";
+  }
+
+  async function saveCatalogEdit(event) {
+    event.preventDefault();
+    if (editingCatalogIndex < 0 || !$("#catalog-edit-form").reportValidity()) return;
+    if (!cloudUser || !supabaseClient) {
+      $("#catalog-edit-status").textContent = "Sign in to save catalog changes.";
+      $("#catalog-edit-status").classList.add("error");
+      return;
+    }
+    const product = $("#catalog-edit-product").value.trim();
+    const unit = $("#catalog-edit-unit").value.trim();
+    const duplicate = productCatalog.some((item, index) =>
+      index !== editingCatalogIndex && item.product.toLocaleLowerCase() === product.toLocaleLowerCase()
+    );
+    if (!unit) {
+      $("#catalog-edit-status").textContent = "Select at least one UOM.";
+      $("#catalog-edit-status").classList.add("error");
+      return;
+    }
+    if (duplicate) {
+      $("#catalog-edit-status").textContent = "Another product already has this description.";
+      $("#catalog-edit-status").classList.add("error");
+      return;
+    }
+    const previous = productCatalog[editingCatalogIndex];
+    productCatalog[editingCatalogIndex] = {
+      product,
+      unit,
+      quantities: splitCatalogValues($("#catalog-edit-quantities").value),
+      qtyItems: splitCatalogValues($("#catalog-edit-qty-items").value),
+      taken: splitCatalogValues($("#catalog-edit-taken").value),
+      rQuantities: splitCatalogValues($("#catalog-edit-r-quantities").value),
+      uomNs: splitCatalogValues($("#catalog-edit-uom-ns").value),
+      statuses: splitCatalogValues($("#catalog-edit-statuses").value)
+    };
+    try {
+      await saveCatalogToCloud(currentCatalogData());
+      indexProductCatalog();
+      renderProductCatalogOptions();
+      refreshPreview();
+      closeCatalogEdit();
+      showToast("Product catalog updated.");
+    } catch (error) {
+      productCatalog[editingCatalogIndex] = previous;
+      console.error("Could not save the catalog product.", error);
+      $("#catalog-edit-status").textContent = error.message || "Could not save catalog changes.";
+      $("#catalog-edit-status").classList.add("error");
+    }
   }
 
   function setSyncStatus(message, isError = false) {
@@ -214,8 +417,89 @@
       };
     });
     renderProductCatalogOptions();
+    renderCatalogFilterOptions();
     updateConverter();
     refreshPreview();
+  }
+
+  function currentCatalogData() {
+    return {
+      products: productCatalog.map((item) => ({
+        product: String(item.product || ""),
+        quantity: String(item.quantity || ""),
+        quantities: Array.isArray(item.quantities) ? item.quantities.map(String) : [],
+        qtyItems: Array.isArray(item.qtyItems) ? item.qtyItems.map(String) : [],
+        taken: Array.isArray(item.taken) ? item.taken.map(String) : [],
+        rQuantities: Array.isArray(item.rQuantities) ? item.rQuantities.map(String) : [],
+        uomNs: Array.isArray(item.uomNs) ? item.uomNs.map(String) : [],
+        unit: String(item.unit || ""),
+        statuses: Array.isArray(item.statuses) ? item.statuses.map(String) : []
+      })),
+      converters,
+      gypsumConverters
+    };
+  }
+
+  function catalogHasWorkbookColumns(data) {
+    return Array.isArray(data?.products)
+      && data.products.some((item) =>
+        Array.isArray(item?.quantities)
+        || Array.isArray(item?.taken)
+        || Array.isArray(item?.statuses)
+      );
+  }
+
+  async function saveCatalogToCloud(data = currentCatalogData()) {
+    if (!supabaseClient || !cloudUser) return;
+    const { error } = await supabaseClient.from("workspace_catalog").upsert({
+      catalog_key: "default",
+      data,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "catalog_key" });
+    if (error) throw error;
+  }
+
+  async function loadCatalogFromCloud() {
+    const { data, error } = await supabaseClient
+      .from("workspace_catalog")
+      .select("data")
+      .eq("catalog_key", "default")
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.data && catalogHasWorkbookColumns(data.data)) applySyncedSourceData(data.data);
+    return Boolean(data?.data);
+  }
+
+  async function uploadWorkbook(file) {
+    if (!file) return;
+    const fileApp = location.protocol === "file:";
+    const localServer = fileApp || location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname);
+    if (!localServer) {
+      setSyncStatus("Excel upload is available when using Start Order Desk.cmd.", true);
+      return;
+    }
+    const apiBase = fileApp ? "http://127.0.0.1:8765" : "";
+    setSyncStatus("Uploading Excel workbook…");
+    try {
+      const response = await fetch(`${apiBase}/api/upload-workbook`, {
+        method: "POST",
+        body: file,
+        cache: "no-store",
+        mode: fileApp ? "cors" : "same-origin"
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || "Could not upload the workbook.");
+      lastSyncedVersion = "";
+      applySyncedSourceData(result.data);
+      lastSyncedVersion = result.data.version;
+      await saveCatalogToCloud(currentCatalogData());
+      setSyncStatus(`Excel catalog updated · ${result.data.products.length.toLocaleString("en")} products.`);
+      showToast("Product catalog updated from Excel.");
+    } catch (error) {
+      console.error("Could not upload the Excel workbook.", error);
+      setSyncStatus(`Excel upload failed — ${error.message}`, true);
+      showToast("The Excel workbook could not be uploaded.");
+    }
   }
 
   async function syncSourceData(force = false) {
@@ -239,6 +523,7 @@
       if (result.data.version !== lastSyncedVersion) {
         applySyncedSourceData(result.data);
         lastSyncedVersion = result.data.version;
+        if (cloudUser && supabaseClient) await saveCatalogToCloud(currentCatalogData());
       }
       if (result.warning) {
         if (result.warning !== lastSyncError) console.error("Live source sync warning.", result.warning);
@@ -455,12 +740,17 @@
   }
 
   async function loadCloudData(importLocalData) {
-    const [orderResult, driverResult] = await Promise.all([
+    const [orderResult, driverResult, catalogResult] = await Promise.all([
       supabaseClient.from("orders").select("id,data").order("id"),
-      supabaseClient.from("drivers").select("driver_key,name,phone").order("name")
+      supabaseClient.from("drivers").select("driver_key,name,phone").order("name"),
+      supabaseClient.from("workspace_catalog").select("data").eq("catalog_key", "default").maybeSingle()
     ]);
     if (orderResult.error) throw orderResult.error;
     if (driverResult.error) throw driverResult.error;
+    if (catalogResult.error) throw catalogResult.error;
+    if (catalogResult.data?.data && catalogHasWorkbookColumns(catalogResult.data.data)) {
+      applySyncedSourceData(catalogResult.data.data);
+    }
 
     let orderData = orderResult.data.map((row) => row.data);
     if (importLocalData) {
@@ -1642,6 +1932,26 @@
       const horizontalPadding = Number.parseFloat(parentStyle.paddingLeft) + Number.parseFloat(parentStyle.paddingRight);
       const availableWidth = Math.max(0, element.parentElement.clientWidth - horizontalPadding);
       const style = getComputedStyle(element);
+      if (element.classList.contains("print-item-product") && element.closest(".receipt-mode") && availableWidth > 0) {
+        context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        const words = element.textContent.trim().split(/\s+/);
+        const lines = [];
+        let line = "";
+        while (words.length && lines.length < 2) {
+          const word = words.pop();
+          const candidate = line ? `${word} ${line}` : word;
+          if (line && context.measureText(candidate).width > availableWidth) {
+            lines.unshift(line);
+            line = word;
+          } else {
+            line = candidate;
+          }
+        }
+        if (line && lines.length < 2) lines.unshift(line);
+        element.textContent = lines.join(" ");
+        return;
+      }
+      if (style.whiteSpace !== "nowrap") return;
       const baseSize = Number.parseFloat(style.fontSize);
       context.font = `${style.fontWeight} ${baseSize}px ${style.fontFamily}`;
       const textWidth = context.measureText(element.textContent).width;
@@ -1659,6 +1969,7 @@
     const message = $(".qty-calculation-message", row);
     const ordered = Number(orderedInput.value);
     const qtyItem = Number(qtyItemInput.value.trim().replace(",", "."));
+    const tileProduct = isTileProduct($(".product-input", row).value);
     if (!orderedInput.value || !Number.isFinite(ordered) || !Number.isFinite(qtyItem) || qtyItem <= 0 || !quantityInput) {
       if (row.dataset.autoCalculated === "true") {
         const autoValues = JSON.parse(row.dataset.autoCalculatedValues || "[]");
@@ -1674,7 +1985,7 @@
     }
 
     const exactQuantity = ordered / qtyItem;
-    const hasFiriQuantity = !isTileProduct($(".product-input", row).value)
+    const hasFiriQuantity = !tileProduct
       && quantityInputs.length > 1
       && getCatalogProduct($(".product-input", row).value)?.qtyItems?.length;
     const calculatedQuantity = hasFiriQuantity
@@ -1688,7 +1999,7 @@
     row.dataset.autoCalculated = "true";
     const autoValues = hasFiriQuantity ? [calculatedQuantity, firiQuantity] : [calculatedQuantity];
     row.dataset.autoCalculatedValues = JSON.stringify(autoValues.map(String));
-    if (hasFiriQuantity || Number.isInteger(exactQuantity)) {
+    if (tileProduct || hasFiriQuantity || Number.isInteger(exactQuantity)) {
       message.hidden = true;
       message.textContent = "";
     } else {
@@ -1912,12 +2223,13 @@
         .filter((pair) => Number(pair.quantity) > 0)
         .map((pair) => `${pair.quantity} ${pair.unit}`)
         .join(" · ");
-      const ordered = item.ordered === "" || item.ordered == null ? "" : `<small class="print-item-ordered">Ordered: ${escapeAttribute(item.ordered)}</small>`;
+      const ordered = item.ordered === "" || item.ordered == null ? "" : `<small class="print-item-ordered">${escapeAttribute(item.ordered)}</small>`;
       const quantityDisplay = quantityText ? escapeAttribute(quantityText) : "No quantity";
+      const quantityContent = `<span class="print-item-quantity-content"><small class="print-item-quantities">${quantityDisplay}</small></span>`;
       if (isTileProduct(item.product)) {
-        return `<tr class="tile-print-item"><td>${index + 1}</td><td colspan="2"><strong class="print-item-product">${escapeAttribute(item.product)}</strong>${ordered}<small class="print-item-quantities">${quantityDisplay}</small></td></tr>`;
+        return `<tr class="tile-print-item"><td>${index + 1}</td><td colspan="2"><strong class="print-item-product">${escapeAttribute(item.product)}</strong>${ordered}${quantityContent}</td></tr>`;
       }
-      return `<tr class="non-tile-print-item"><td>${index + 1}</td><td><strong class="print-item-product">${escapeAttribute(item.product)}</strong>${ordered}</td><td class="print-item-quantities">${quantityDisplay}</td></tr>`;
+      return `<tr class="non-tile-print-item"><td>${index + 1}</td><td><strong class="print-item-product">${escapeAttribute(item.product)}</strong>${ordered}</td><td>${quantityContent}</td></tr>`;
     }).join("");
     $("#paper-items").innerHTML = rows;
     fitProductDescriptions($("#paper-items"));
@@ -2087,9 +2399,9 @@
       const quantityText = quantities.map((pair) => `${pair.quantity || "-"} ${pair.unit || ""}`).join(" | ");
       const tileProduct = isTileProduct(item.product || "");
       const productText = cleanPdfText(item.product || "-");
-      const productLines = [productText];
-      const orderedLines = item.ordered === "" || item.ordered == null ? [] : wrapText(`Ordered: ${item.ordered}`, tileProduct ? 68 : 40);
-      const productBlockLines = productLines.length + orderedLines.length;
+      const productLines = wrapText(productText, tileProduct ? 68 : 40).slice(-2);
+      const orderedLines = item.ordered === "" || item.ordered == null ? [] : wrapText(String(item.ordered), tileProduct ? 68 : 40);
+      const productBlockLines = productLines.length;
       const quantityLines = wrapText(quantityText, tileProduct ? 68 : 27);
       const quantityFontSize = tileProduct ? 11 : 9;
       const quantityLineHeight = tileProduct ? 15 : 13;
@@ -2102,14 +2414,14 @@
       const itemCenterX = (margin + 31 + pageWidth - margin) / 2;
       addCenteredText(String(index + 1), margin + 19, y + 7, 9, "F1", muted);
       if (tileProduct) {
-        addCenteredText(productText, itemCenterX, y + 7, fitPdfTextSize(productText, pageWidth - margin * 2 - 31, 9));
-        orderedLines.forEach((line, lineIndex) => addCenteredText(line, itemCenterX, y + 7 + (productLines.length + lineIndex) * productLineHeight, 8, "F1", muted));
-        quantityLines.forEach((line, lineIndex) => addCenteredText(line, itemCenterX, y + 7 + (productBlockLines + lineIndex) * quantityLineHeight, quantityFontSize, "F2"));
+        productLines.forEach((line, lineIndex) => addCenteredText(line, itemCenterX, y + 7 + lineIndex * productLineHeight, fitPdfTextSize(line, pageWidth - margin * 2 - 31, 9)));
+        orderedLines.forEach((line, lineIndex) => addCenteredText(line, itemCenterX, y + 7 + (productBlockLines + lineIndex) * productLineHeight, 8, "F1", muted));
+        quantityLines.forEach((line, lineIndex) => addCenteredText(line, itemCenterX, y + 7 + (productBlockLines + orderedLines.length + lineIndex) * quantityLineHeight, quantityFontSize, "F2"));
       } else {
         const productCenterX = (margin + 31 + 300) / 2;
         const quantityCenterX = (300 + pageWidth - margin) / 2;
-        addCenteredText(productText, productCenterX, y + 7, fitPdfTextSize(productText, 300 - margin - 31, 9));
-        orderedLines.forEach((line, lineIndex) => addCenteredText(line, productCenterX, y + 7 + (productLines.length + lineIndex) * productLineHeight, 8, "F1", muted));
+        productLines.forEach((line, lineIndex) => addCenteredText(line, productCenterX, y + 7 + lineIndex * productLineHeight, fitPdfTextSize(line, 300 - margin - 31, 9)));
+        orderedLines.forEach((line, lineIndex) => addCenteredText(line, quantityCenterX + 35, y + 7 + lineIndex * quantityLineHeight, 8, "F1", muted));
         quantityLines.forEach((line, lineIndex) => addCenteredText(line, quantityCenterX, y + 7 + lineIndex * quantityLineHeight, quantityFontSize));
       }
       y += rowHeight;
@@ -2221,6 +2533,108 @@
 
   async function takeReceiptScreenshot() {
     if (!printPreviewOrder) throw new Error("There is no order to capture.");
+    if (!navigator.clipboard?.write || typeof ClipboardItem !== "function") {
+      throw new Error("Image clipboard access is unavailable. Allow clipboard access in Firefox, then try again.");
+    }
+    const order = printPreviewOrder;
+    const width = 286;
+    const scale = 4;
+    const padding = 10;
+    const contentWidth = width - padding * 2;
+    const canvas = document.createElement("canvas");
+    const measure = canvas.getContext("2d");
+    if (!measure) throw new Error("Could not create the screenshot image.");
+    const wrap = (value, font, maxWidth) => {
+      measure.font = font;
+      const lines = [];
+      let line = "";
+      for (const word of String(value || "-").split(/\s+/)) {
+        const candidate = line ? `${line} ${word}` : word;
+        if (line && measure.measureText(candidate).width > maxWidth) {
+          lines.push(line);
+          line = word;
+        } else line = candidate;
+      }
+      if (line) lines.push(line);
+      return lines;
+    };
+    const fields = [
+      ["ORDER DATE", formatDate(order.date)], ["CUSTOMER / COMPANY", order.customer],
+      ["DELIVERED BY", order.driver], ["BRANCH", order.branch],
+      ["DRIVER PHONE", order.driverPhone], ["TRANSFER ID", order.transferId]
+    ];
+    const itemData = order.items.map((item, index) => {
+      const product = wrap(item.product, "700 11px Arial", 230).slice(-2);
+      const quantities = (item.quantities || [{ quantity: item.quantity, unit: item.unit }])
+        .filter((pair) => Number(pair.quantity) > 0)
+        .map((pair) => `${pair.quantity} ${pair.unit}`).join(" · ");
+      return { index: index + 1, product, quantities: wrap(quantities || "No quantity", "700 10px Arial", 230) };
+    });
+    const itemHeight = itemData.reduce((total, item) => total + Math.max(item.product.length, item.quantities.length) * 15 + 14, 0);
+    const height = 18 + Math.ceil(fields.length / 2) * 39 + 18 + 24 + itemHeight + (order.preparedBy ? 54 : 18);
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not create the screenshot image.");
+    context.scale(scale, scale);
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, width, height);
+    context.textBaseline = "top";
+    let y = 12;
+    for (let index = 0; index < fields.length; index += 2) {
+      fields.slice(index, index + 2).forEach(([label, value], column) => {
+        const x = padding + column * (contentWidth / 2);
+        context.textAlign = "center";
+        context.fillStyle = "#333";
+        context.font = "700 7px Arial";
+        context.fillText(label, x + contentWidth / 4, y);
+        context.fillStyle = "#111";
+        context.font = "600 10px Arial";
+        wrap(value, "600 10px Arial", contentWidth / 2 - 8).slice(0, 2)
+          .forEach((line, lineIndex) => context.fillText(line, x + contentWidth / 4, y + 13 + lineIndex * 12));
+      });
+      y += 39;
+    }
+    y += 8;
+    context.fillStyle = "#eee";
+    context.fillRect(padding, y, contentWidth, 24);
+    context.fillStyle = "#222";
+    context.font = "700 7px Arial";
+    context.textAlign = "left";
+    context.fillText("#", padding + 8, y + 8);
+    context.fillText("PRODUCT / DESCRIPTION", padding + 24, y + 8);
+    y += 24;
+    itemData.forEach((item) => {
+      const rowHeight = Math.max(item.product.length, item.quantities.length) * 15 + 14;
+      context.fillStyle = "#111";
+      context.font = "600 9px Arial";
+      context.textAlign = "left";
+      context.fillText(String(item.index), padding + 4, y + 8);
+      context.font = "700 11px Arial";
+      item.product.forEach((line, index) => context.fillText(line, padding + 24, y + 7 + index * 15));
+      context.font = "700 10px Arial";
+      item.quantities.forEach((line, index) => context.fillText(line, padding + 24, y + 7 + (item.product.length + index) * 15));
+      y += rowHeight;
+      context.fillStyle = "#777";
+      context.fillRect(padding, y, contentWidth, 1);
+    });
+    if (order.preparedBy) {
+      y += 20;
+      context.textAlign = "right";
+      context.fillStyle = "#777";
+      context.font = "700 7px Arial";
+      context.fillText("CREATED BY", width - padding, y);
+      context.fillStyle = "#222";
+      context.font = "600 9px Arial";
+      context.fillText(order.preparedBy, width - padding, y + 14);
+    }
+    const png = new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not encode the screenshot image.")), "image/png");
+    });
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+    return true;
+
+    /*
     const order = printPreviewOrder;
     const width = 302;
     const scale = 2;
@@ -2268,21 +2682,24 @@
     }
 
     const itemRows = order.items.map((item, index) => {
-      const productLines = wrap(item.product, "600 12px Arial, sans-serif", 132);
+      const productLines = wrap(item.product, "600 13px Arial, sans-serif", 145);
+      if (productLines.length > 2) {
+        productLines.splice(0, productLines.length - 2);
+      }
       const orderedLines = item.ordered === "" || item.ordered == null
         ? []
-        : wrap(`Ordered: ${item.ordered}`, "10px Arial, sans-serif", 132);
+        : wrap(String(item.ordered), "10px Arial, sans-serif", 40);
       const quantities = (item.quantities || [{ quantity: item.quantity, unit: item.unit }])
         .filter((pair) => Number(pair.quantity) > 0)
         .map((pair) => `${pair.quantity} ${pair.unit}`)
         .join(" · ") || "No quantity";
-      const quantityLines = wrap(quantities, "600 12px Arial, sans-serif", 90);
+      const quantityLines = wrap(quantities, "600 13px Arial, sans-serif", 95);
       return {
         index: index + 1,
         productLines,
         orderedLines,
         quantityLines,
-        height: Math.max((productLines.length + orderedLines.length) * 16, quantityLines.length * 16) + 14
+        height: Math.max(productLines.length * 17, orderedLines.length * 17, quantityLines.length * 17) + 14
       };
     });
 
@@ -2324,26 +2741,31 @@
     context.fillStyle = "#f0f0f0";
     context.fillRect(padding, y, contentWidth, 26);
     context.fillStyle = "#111";
-    context.font = "700 8px Arial, sans-serif";
+    context.font = "700 9px Arial, sans-serif";
     context.textAlign = "center";
     context.fillText("#", padding + 13, y + 9);
-    context.fillText("PRODUCT / DESCRIPTION", padding + 91, y + 9);
+    context.textAlign = "left";
+    context.fillText("PRODUCT / DESCRIPTION", padding + 30, y + 9);
     y += 26;
 
     itemRows.forEach((row) => {
       const rowTop = y;
       context.fillStyle = "#111";
-      context.font = "600 12px Arial, sans-serif";
+      context.font = "500 10px Arial, sans-serif";
       context.textAlign = "left";
       context.fillText(String(row.index), padding + 7, rowTop + 8);
-      context.textAlign = "center";
-      row.productLines.forEach((line, index) => context.fillText(line, padding + 91, rowTop + 8 + index * 16));
+      context.font = "600 13px Arial, sans-serif";
+      row.productLines.forEach((line, index) => context.fillText(line, padding + 30, rowTop + 8 + index * 17));
       context.fillStyle = "#666";
       context.font = "10px Arial, sans-serif";
-      row.orderedLines.forEach((line, index) => context.fillText(line, padding + 91, rowTop + 8 + (row.productLines.length + index) * 16));
       context.fillStyle = "#111";
-      context.font = "600 12px Arial, sans-serif";
-      row.quantityLines.forEach((line, index) => context.fillText(line, width - padding - 39, rowTop + 8 + index * 16));
+      context.font = "600 13px Arial, sans-serif";
+      context.textAlign = "left";
+      row.quantityLines.forEach((line, index) => context.fillText(line, padding + 30 + 145, rowTop + 8 + index * 17));
+      context.fillStyle = "#666";
+      context.font = "10px Arial, sans-serif";
+      context.textAlign = "right";
+      row.orderedLines.forEach((line, index) => context.fillText(line, width - padding - 4, rowTop + 8 + index * 17));
       y += row.height;
       context.fillStyle = "#777";
       context.fillRect(padding, y, contentWidth, 1);
@@ -2378,6 +2800,84 @@
     });
     await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
     return true;
+    */
+  }
+
+  async function takeReceiptScreenshotPreviewUnused() {
+    if (!printPreviewOrder) throw new Error("There is no order to capture.");
+    if (!navigator.clipboard?.write || typeof ClipboardItem !== "function") {
+      throw new Error("Image clipboard access is unavailable. Allow clipboard access in Firefox, then try again.");
+    }
+    const source = $(".print-sheet");
+    if (!source) throw new Error("The print preview is not available.");
+    await document.fonts?.ready;
+    const bounds = source.getBoundingClientRect();
+    const width = Math.ceil(bounds.width);
+    const height = Math.ceil(source.scrollHeight);
+    const clone = source.cloneNode(true);
+    clone.querySelector("#take-receipt-screenshot")?.remove();
+    const copyStyles = (original, copy) => {
+      const computed = getComputedStyle(original);
+      for (const property of computed) {
+        copy.style.setProperty(property, computed.getPropertyValue(property));
+      }
+      [...original.children].forEach((child, index) => {
+        if (copy.children[index]) copyStyles(child, copy.children[index]);
+      });
+    };
+    copyStyles(source, clone);
+    clone.style.width = `${width}px`;
+    clone.style.height = `${height}px`;
+    clone.style.minHeight = "0";
+    clone.style.margin = "0";
+    clone.style.boxShadow = "none";
+    for (const image of clone.querySelectorAll("img")) {
+      const original = source.querySelector(`img[src="${image.getAttribute("src")}"]`);
+      if (!original?.complete || !original.naturalWidth) {
+        image.remove();
+        continue;
+      }
+      try {
+        const response = await fetch(new URL(original.getAttribute("src"), document.baseURI));
+        if (!response.ok) throw new Error(`Image request failed with status ${response.status}.`);
+        const blob = await response.blob();
+        image.src = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("Could not read the preview logo."));
+          reader.readAsDataURL(blob);
+        });
+      } catch (error) {
+        console.warn("Could not embed the preview logo; omitting it from the screenshot.", error);
+        image.remove();
+      }
+    }
+    const serialized = new XMLSerializer().serializeToString(clone);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xhtml="http://www.w3.org/1999/xhtml" width="${width}" height="${height}"><foreignObject width="100%" height="100%"><xhtml:div xmlns="http://www.w3.org/1999/xhtml">${serialized}</xhtml:div></foreignObject></svg>`;
+    const svgUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+    try {
+      const image = new Image();
+      image.src = svgUrl;
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = () => reject(new Error("Could not render the print preview screenshot."));
+      });
+      const scale = Math.min(4, Math.max(2, 2400 / width));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(width * scale);
+      canvas.height = Math.ceil(height * scale);
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Could not create the screenshot image.");
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const png = new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not encode the screenshot image.")), "image/png");
+      });
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+    } finally {
+      URL.revokeObjectURL(svgUrl);
+    }
   }
 
   function printOrderNow() {
@@ -2521,6 +3021,26 @@
     refreshPreview();
     $("#order-form-title").textContent = "Create an order";
     $("#order-id-label").textContent = "NEW ORDER";
+    updateOrderNavigation();
+  }
+
+  function updateOrderNavigation() {
+    const previousButton = $("#previous-order");
+    const nextButton = $("#next-order");
+    const activeOrders = orders.filter((order) => !order.deletedAt).sort((a, b) => b.createdAt - a.createdAt);
+    const currentIndex = activeOrders.findIndex((order) => order.id === editingId);
+    const isEditingOrder = currentIndex >= 0;
+    previousButton.hidden = !isEditingOrder;
+    nextButton.hidden = !isEditingOrder;
+    previousButton.disabled = !isEditingOrder || currentIndex === 0;
+    nextButton.disabled = !isEditingOrder || currentIndex === activeOrders.length - 1;
+  }
+
+  function navigateOrder(offset) {
+    const activeOrders = orders.filter((order) => !order.deletedAt).sort((a, b) => b.createdAt - a.createdAt);
+    const currentIndex = activeOrders.findIndex((order) => order.id === editingId);
+    const nextOrder = activeOrders[currentIndex + offset];
+    if (nextOrder) editOrder(nextOrder.id);
   }
 
   function openNewOrder(category = categories[0]) {
@@ -2548,6 +3068,7 @@
     (order.items.length ? order.items : [{}]).forEach(createItemRow);
     updateConverterVisibility();
     refreshPreview();
+    updateOrderNavigation();
     setView("new-order");
   }
 
@@ -2605,8 +3126,7 @@
     showToast(index >= 0 ? "Order updated successfully." : "Order saved successfully.");
     editingId = order.id;
     refreshPreview();
-    openPrintPreview(order, "overview");
-    downloadOrderPdf(order, true);
+    setView("overview");
   }
 
   async function changeStatus(id) {
@@ -2814,6 +3334,8 @@
     }
     openPrintPreview(order, "new-order");
   });
+  $("#previous-order").addEventListener("click", () => navigateOrder(-1));
+  $("#next-order").addEventListener("click", () => navigateOrder(1));
   $("#back-from-preview").addEventListener("click", closePrintPreview);
   $("#preview-receipt").addEventListener("click", () => setPrintLayout("receipt"));
   $("#preview-full-page").addEventListener("click", () => setPrintLayout("full-page"));
@@ -2829,10 +3351,22 @@
   });
   $("#print-order-now").addEventListener("click", printOrderNow);
   $("#download-pdf").addEventListener("click", () => downloadOrderPdf());
+  $("#upload-workbook").addEventListener("click", () => $("#workbook-file").click());
+  $("#workbook-file").addEventListener("change", (event) => {
+    const file = event.target.files[0];
+    event.target.value = "";
+    uploadWorkbook(file);
+  });
+  $("#catalog-edit-form").addEventListener("submit", saveCatalogEdit);
+  $("#catalog-edit-cancel").addEventListener("click", closeCatalogEdit);
   $("#order-search").addEventListener("input", renderAllOrders);
   $("#status-filter").addEventListener("change", renderAllOrders);
   $("#order-date-filter").addEventListener("change", renderAllOrders);
   $("#catalog-search").addEventListener("input", renderProductCatalogTable);
+  $$("[data-catalog-filter]").forEach((filter) => {
+    filter.addEventListener("input", renderProductCatalogTable);
+    filter.addEventListener("change", renderProductCatalogTable);
+  });
   window.addEventListener("resize", () => {
     fitProductDescriptions($("#preview-items"));
     fitProductDescriptions($("#paper-items"));

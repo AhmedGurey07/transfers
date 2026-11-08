@@ -1,5 +1,9 @@
 $ErrorActionPreference = "Stop"
-$workbookPath = "C:\Users\User\OneDrive\Desktop\Ware house 200 last update 04-07-2026.xlsm"
+$workbookPath = if ($env:ORDER_DESK_WORKBOOK_PATH) {
+    $env:ORDER_DESK_WORKBOOK_PATH
+} else {
+    "C:\Users\User\OneDrive\Desktop\Ware house 200 last update 04-07-2026.xlsm"
+}
 $calculatorPath = "C:\Users\User\OneDrive\Desktop\AHMED FOLDER\calculator"
 $invariant = [Globalization.CultureInfo]::InvariantCulture
 
@@ -120,6 +124,37 @@ function Convert-CellText {
     return ([string]$Value).Trim()
 }
 
+function Format-CatalogNumber {
+    param([string]$Value)
+    $number = 0.0
+    if ([double]::TryParse($Value, [Globalization.NumberStyles]::Any, $invariant, [ref]$number)) {
+        return $number.ToString("0.##", $invariant)
+    }
+    return $Value
+}
+
+function Get-HeaderColumn {
+    param([object]$Values, [int]$Row, [int]$FirstColumn, [int]$LastColumn, [string[]]$Names, [int]$FallbackOffset)
+    $headers = @{}
+    for ($column = $FirstColumn; $column -le $LastColumn; $column++) {
+        $header = (Convert-CellText $Values[$Row, $column]).ToLowerInvariant() -replace "[^a-z0-9]", ""
+        $headers[$column] = $header
+    }
+    foreach ($column in $headers.Keys) {
+        if ($Names -contains $headers[$column]) {
+            return $column
+        }
+    }
+    foreach ($column in $headers.Keys) {
+        if ($Names | Where-Object { $headers[$column] -like "*$_*" }) {
+            return $column
+        }
+    }
+    $fallback = $FirstColumn + $FallbackOffset
+    if ($fallback -le $LastColumn) { return $fallback }
+    throw "The SalesData sheet is missing a required column."
+}
+
 $excel = $null
 $book = $null
 $sheet = $null
@@ -146,35 +181,71 @@ try {
     $firstRow = $values.GetLowerBound(0)
     $lastRow = $values.GetUpperBound(0)
     $firstColumn = $values.GetLowerBound(1)
-    if ($lastRow -le $firstRow -or $values.GetUpperBound(1) -lt $firstColumn + 7) {
-        throw "The SalesData sheet is missing the Product, Q/Item, or UOM columns."
+    $lastColumn = $values.GetUpperBound(1)
+    if ($lastRow -le $firstRow) {
+        throw "The SalesData sheet does not contain a product table."
     }
+    $productColumn = Get-HeaderColumn $values $firstRow $firstColumn $lastColumn @("product", "description", "productdescription") 1
+    $quantityColumn = Get-HeaderColumn $values $firstRow $firstColumn $lastColumn @("quantity", "qty") 2
+    $qtyItemColumn = Get-HeaderColumn $values $firstRow $firstColumn $lastColumn @("qitem", "qtyitem", "quantityitem") 3
+    $takenColumn = Get-HeaderColumn $values $firstRow $firstColumn $lastColumn @("taken") 4
+    $rQuantityColumn = Get-HeaderColumn $values $firstRow $firstColumn $lastColumn @("rquantity", "rqty", "requiredquantity") 5
+    $uomNColumn = Get-HeaderColumn $values $firstRow $firstColumn $lastColumn @("uomn", "uomnumber") 6
+    $unitColumn = Get-HeaderColumn $values $firstRow $firstColumn $lastColumn @("uom", "unit") 7
+    $statusColumn = Get-HeaderColumn $values $firstRow $firstColumn $lastColumn @("sts", "status") 8
     $products = [Collections.Generic.List[object]]::new()
     $productIndexes = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
     for ($row = $firstRow + 1; $row -le $lastRow; $row++) {
-        $name = Convert-CellText $values[$row, ($firstColumn + 1)]
+        $name = Convert-CellText $values[$row, $productColumn]
         if (-not $name) { continue }
-        $unit = Convert-CellText $values[$row, ($firstColumn + 7)]
+        $quantity = Convert-CellText $values[$row, $quantityColumn]
+        $unit = Convert-CellText $values[$row, $unitColumn]
         if (-not $unit) { $unit = "PCS" }
-        $qtyItem = Convert-CellText $values[$row, ($firstColumn + 3)]
-        $rQuantity = Convert-CellText $values[$row, ($firstColumn + 5)]
-        $uomN = Convert-CellText $values[$row, ($firstColumn + 6)]
+        $qtyItem = Convert-CellText $values[$row, $qtyItemColumn]
+        $taken = Convert-CellText $values[$row, $takenColumn]
+        $rQuantity = Convert-CellText $values[$row, $rQuantityColumn]
+        $uomN = Convert-CellText $values[$row, $uomNColumn]
+        $status = Convert-CellText $values[$row, $statusColumn]
+        $quantity = Format-CatalogNumber $quantity
+        $qtyItem = Format-CatalogNumber $qtyItem
+        $taken = Format-CatalogNumber $taken
+        $rQuantity = Format-CatalogNumber $rQuantity
+        $uomN = Format-CatalogNumber $uomN
+        $quantityNumber = 0.0
+        $takenNumber = 0.0
+        $rQuantityNumber = 0.0
+        $qtyItemNumber = 0.0
+        if (([double]::TryParse($quantity, [Globalization.NumberStyles]::Any, $invariant, [ref]$quantityNumber)) -and
+            ([double]::TryParse($taken, [Globalization.NumberStyles]::Any, $invariant, [ref]$takenNumber))) {
+            $rQuantity = ($quantityNumber - $takenNumber).ToString("0.##", $invariant)
+        }
+        if (([double]::TryParse($rQuantity, [Globalization.NumberStyles]::Any, $invariant, [ref]$rQuantityNumber)) -and
+            ([double]::TryParse($qtyItem, [Globalization.NumberStyles]::Any, $invariant, [ref]$qtyItemNumber)) -and
+            ($qtyItemNumber -ne 0)) {
+            $uomN = ($rQuantityNumber / $qtyItemNumber).ToString("0.##", $invariant)
+        }
         if (-not $productIndexes.ContainsKey($name)) {
             $entry = [pscustomobject]@{
                 product = $name
                 unit = $unit
+                quantities = [Collections.Generic.List[string]]::new()
                 qtyItems = [Collections.Generic.List[string]]::new()
+                taken = [Collections.Generic.List[string]]::new()
                 rQuantities = [Collections.Generic.List[string]]::new()
                 uomNs = [Collections.Generic.List[string]]::new()
+                statuses = [Collections.Generic.List[string]]::new()
             }
             $productIndexes.Add($name, $products.Count)
             $products.Add($entry)
         }
         $entry = $products[$productIndexes[$name]]
         if ($entry.unit -eq "PCS" -and $unit -ne "PCS") { $entry.unit = $unit }
+        if ($quantity -and -not $entry.quantities.Contains($quantity)) { $entry.quantities.Add($quantity) }
         if ($qtyItem -and -not $entry.qtyItems.Contains($qtyItem)) { $entry.qtyItems.Add($qtyItem) }
+        if ($taken -and -not $entry.taken.Contains($taken)) { $entry.taken.Add($taken) }
         if ($rQuantity -and -not $entry.rQuantities.Contains($rQuantity)) { $entry.rQuantities.Add($rQuantity) }
         if ($uomN -and -not $entry.uomNs.Contains($uomN)) { $entry.uomNs.Add($uomN) }
+        if ($status -and -not $entry.statuses.Contains($status)) { $entry.statuses.Add($status) }
     }
     if ($products.Count -eq 0) {
         throw "No products were found in the SalesData sheet."
@@ -183,15 +254,18 @@ try {
         [ordered]@{
             productBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_.product))
             unitBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_.unit))
+            quantitiesBase64 = @($_.quantities.ToArray() | ForEach-Object { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_)) })
             qtyItemsBase64 = @($_.qtyItems.ToArray() | ForEach-Object {
                 [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_))
             })
+            takenBase64 = @($_.taken.ToArray() | ForEach-Object { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_)) })
             rQuantitiesBase64 = @($_.rQuantities.ToArray() | ForEach-Object {
                 [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_))
             })
             uomNsBase64 = @($_.uomNs.ToArray() | ForEach-Object {
                 [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_))
             })
+            statusesBase64 = @($_.statuses.ToArray() | ForEach-Object { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_)) })
         }
     })
 } finally {

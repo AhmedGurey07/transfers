@@ -10,7 +10,7 @@
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="app.js?v=202611080907" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -139,9 +139,23 @@
       </section>
 
       <section class="view" id="catalog-view" aria-labelledby="catalog-title">
-        <div class="page-heading"><div><p class="eyebrow">WAREHOUSE WORKBOOK</p><h1 id="catalog-title">Product catalog</h1><p class="welcome-copy">Products and quantities loaded from the warehouse Excel workbook.</p></div><span class="item-count"><span id="catalog-view-count">0</span> products</span></div>
+        <div class="page-heading"><div><p class="eyebrow">WAREHOUSE WORKBOOK</p><h1 id="catalog-title">Product catalog</h1><p class="welcome-copy">Products and quantities loaded from the warehouse Excel workbook.</p></div><div class="catalog-actions"><button class="button button-secondary" type="button" id="upload-workbook">Upload Excel workbook</button><input id="workbook-file" type="file" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" hidden><span class="item-count"><span id="catalog-view-count">0</span> products</span></div></div>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="catalog-search" type="search" placeholder="Search product, code, unit, or quantity" aria-label="Search product catalog"></label></div>
-        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>PRODUCT / DESCRIPTION</th><th>Q/ITEM</th><th>R/QUANTITY</th><th>UOM/N</th><th>UOM</th></tr></thead><tbody id="catalog-products"></tbody></table></div><div class="empty-state" id="catalog-empty" hidden><span class="empty-icon">⌕</span><strong>No matching products</strong><span>Try a different product name, code, quantity, or unit.</span></div></div>
+        <form class="catalog-edit-form panel" id="catalog-edit-form" hidden>
+          <div class="panel-heading"><div><div><h2>Edit catalog product</h2><p>Update every warehouse column. Separate multiple values with commas.</p></div></div></div>
+          <div class="field-grid">
+            <label class="field field-wide"><span>Product / description <i>*</i></span><input id="catalog-edit-product" required maxlength="200"></label>
+            <label class="field"><span>Quantity</span><input id="catalog-edit-quantities" placeholder="e.g. 20"></label>
+            <label class="field"><span>Q/ITEM</span><input id="catalog-edit-qty-items" placeholder="e.g. 20, 24"></label>
+            <label class="field"><span>Taken</span><input id="catalog-edit-taken" placeholder="e.g. 0"></label>
+            <label class="field"><span>R/QUANTITY</span><input id="catalog-edit-r-quantities" placeholder="e.g. 1460"></label>
+            <label class="field"><span>UOM/N</span><input id="catalog-edit-uom-ns" placeholder="e.g. 73"></label>
+            <label class="field"><span>UOM <i>*</i></span><select id="catalog-edit-unit" required></select></label>
+            <label class="field"><span>STS</span><input id="catalog-edit-statuses" placeholder="e.g. Active"></label>
+          </div>
+          <div class="form-actions"><span class="auth-status" id="catalog-edit-status" role="status" aria-live="polite"></span><div><button class="button button-quiet" type="button" id="catalog-edit-cancel">Cancel</button><button class="button button-primary" type="submit">Save product</button></div></div>
+        </form>
+        <div class="table-card"><div class="table-scroll"><table><thead><tr id="catalog-headings"></tr></thead><tbody id="catalog-products"></tbody></table></div><div class="empty-state" id="catalog-empty" hidden><span class="empty-icon">⌕</span><strong>No matching products</strong><span>Try a different product name, code, quantity, or unit.</span></div></div>
       </section>
 
       <section class="view" id="history-view" aria-labelledby="history-title">
@@ -209,7 +223,7 @@
       </section>
 
       <section class="view" id="new-order-view" aria-labelledby="order-form-title">
-        <div class="page-heading form-page-heading"><div><p class="eyebrow">ORDER BUILDER <span class="heading-dot">·</span> <span id="order-id-label">NEW ORDER</span></p><h1 id="order-form-title">Create an order</h1><p class="welcome-copy">Fill in the details below, then preview and print your order.</p></div><button class="button button-quiet" type="button" data-action="cancel-order">← Back to overview</button></div>
+        <div class="page-heading form-page-heading"><div><p class="eyebrow">ORDER BUILDER <span class="heading-dot">·</span> <span id="order-id-label">NEW ORDER</span></p><h1 id="order-form-title">Create an order</h1><p class="welcome-copy">Fill in the details below, then preview and print your order.</p></div><div class="order-navigation"><button class="button button-quiet" type="button" id="previous-order" aria-label="Open previous order" hidden>← Previous</button><button class="button button-quiet" type="button" id="next-order" aria-label="Open next order" hidden>Next →</button><button class="button button-quiet" type="button" data-action="cancel-order">← Back to overview</button></div></div>
         <form id="order-form">
           <div class="builder-layout">
             <div class="builder-main">

@@ -1534,6 +1534,7 @@
   let orders = [];
   let drivers = [];
   let editingId = null;
+  let orderSort = { key: "createdAt", direction: "desc" };
   let historyOrderFilter = "";
   let itemHistoryProductFilter = "";
   let converterPinnedOpen = false;
@@ -3440,6 +3441,9 @@
 
   function orderRow(order) {
     const row = document.createElement("tr");
+    row.className = "clickable-order-row";
+    row.tabIndex = 0;
+    row.setAttribute("aria-label", `Open order ${order.id}`);
     row.innerHTML = `
       <td><span class="order-number">${escapeAttribute(order.id)}</span></td>
       <td class="customer-cell">${escapeAttribute(order.customer)}</td>
@@ -3447,6 +3451,16 @@
       <td>${formatDate(order.date)}</td>
       <td><button class="status-pill status-${statusClass(order.status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(order.status)}</button></td>
       <td class="row-actions"><button class="icon-button" type="button" aria-label="Open order ${escapeAttribute(order.id)}" title="Open order">↗</button><button class="order-action-button" type="button" data-action="history" aria-label="View history for ${escapeAttribute(order.id)}">History</button><button class="order-action-button order-delete-button" type="button" data-action="delete" aria-label="Delete order ${escapeAttribute(order.id)}">Delete</button></td>`;
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("button, a, input, select, textarea")) return;
+      editOrder(order.id);
+    });
+    row.addEventListener("keydown", (event) => {
+      if ((event.key === "Enter" || event.key === " ") && event.target === row) {
+        event.preventDefault();
+        editOrder(order.id);
+      }
+    });
     $(".icon-button", row).addEventListener("click", () => editOrder(order.id));
     $(".status-pill", row).addEventListener("click", () => changeStatus(order.id));
     $('[data-action="history"]', row).addEventListener("click", () => showOrderHistory(order.id));
@@ -3454,9 +3468,40 @@
     return row;
   }
 
+  function orderSortValue(order, key) {
+    if (key === "date") return order.date || "";
+    if (key === "createdAt") return Number(order.createdAt) || 0;
+    return String(order[key] || "").toLocaleLowerCase();
+  }
+
+  function sortOrders(list) {
+    return [...list].sort((a, b) => {
+      const first = orderSortValue(a, orderSort.key);
+      const second = orderSortValue(b, orderSort.key);
+      const comparison = typeof first === "number" && typeof second === "number"
+        ? first - second
+        : String(first).localeCompare(String(second), undefined, { numeric: true, sensitivity: "base" });
+      return (orderSort.direction === "asc" ? 1 : -1) * (comparison || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+    });
+  }
+
+  function updateOrderSortHeaders() {
+    $$("[data-order-sort]").forEach((header) => {
+      const active = header.dataset.orderSort === orderSort.key;
+      header.classList.toggle("sort-active", active);
+      header.dataset.sortDirection = active ? orderSort.direction : "";
+      header.setAttribute("aria-sort", active
+        ? orderSort.direction === "asc" ? "ascending" : "descending"
+        : "none");
+      header.title = active
+        ? `Sorted ${orderSort.direction === "asc" ? "ascending" : "descending"}. Double-click to sort ${orderSort.direction === "asc" ? "descending" : "ascending"}.`
+        : "Click to sort ascending. Double-click to sort descending.";
+    });
+  }
+
   function renderOverview() {
     const activeOrders = orders.filter((order) => !order.deletedAt);
-    const sorted = [...activeOrders].sort((a, b) => b.createdAt - a.createdAt);
+    const sorted = sortOrders(activeOrders);
     $("#stat-total").textContent = String(activeOrders.length);
     $("#stat-open").textContent = String(activeOrders.filter((order) => order.status !== "Completed").length);
     $("#stat-completed").textContent = String(activeOrders.filter((order) => order.status === "Completed").length);
@@ -3470,7 +3515,7 @@
     const query = $("#order-search").value.trim().toLowerCase();
     const status = $("#status-filter").value;
     const date = $("#order-date-filter").value;
-    const filtered = orders.filter((order) => !order.deletedAt).sort((a, b) => b.createdAt - a.createdAt).filter((order) =>
+    const filtered = sortOrders(orders.filter((order) => !order.deletedAt)).filter((order) =>
       (status === "all" || order.status === status) &&
       (!date || order.date === date) &&
       `${order.id} ${order.customer} ${order.transferId || ""} ${order.category}`.toLowerCase().includes(query)
@@ -3478,6 +3523,7 @@
     const target = $("#all-orders");
     target.replaceChildren(...filtered.map(orderRow));
     $("#orders-empty").hidden = filtered.length > 0;
+    updateOrderSortHeaders();
   }
 
   function showOrderHistory(id) {
@@ -3594,6 +3640,16 @@
 
   function renderItemHistory() {
     const query = $("#item-history-search").value.trim().toLowerCase();
+    const selectedCatalogProduct = itemHistoryProductFilter
+      ? getCatalogProduct(itemHistoryProductFilter)
+      : null;
+    const matchesItemHistoryProduct = (product) => {
+      if (!itemHistoryProductFilter) return true;
+      const catalogProduct = getCatalogProduct(product);
+      if (selectedCatalogProduct && catalogProduct) return catalogProduct === selectedCatalogProduct;
+      return String(product || "").trim().toLocaleLowerCase()
+        === itemHistoryProductFilter.trim().toLocaleLowerCase();
+    };
     const visibleDates = new Set([
       dateValue(new Date()),
       dateValue(new Date(Date.now() - 86400000))
@@ -3603,9 +3659,7 @@
       .flatMap((order) => order.items.flatMap((item) => {
         const createdAt = Number(order.createdAt) || 0;
         const warehouseTransfer = isWarehouseTransfer(order);
-        const matchesSelectedProduct = !itemHistoryProductFilter
-          || item.product.toLocaleLowerCase() === itemHistoryProductFilter.toLocaleLowerCase();
-        if (!matchesSelectedProduct) return [];
+        if (!matchesItemHistoryProduct(item.product)) return [];
         if (!createdAt || !itemHistoryProductFilter && !warehouseTransfer
           && !visibleDates.has(dateValue(new Date(createdAt)))) return [];
         const ordered = Number(item.ordered);
@@ -3627,8 +3681,7 @@
       }))
       ;
     const adjustmentEntries = catalogAdjustments
-      .filter((entry) => !itemHistoryProductFilter
-        || entry.product.toLocaleLowerCase() === itemHistoryProductFilter.toLocaleLowerCase())
+      .filter((entry) => matchesItemHistoryProduct(entry.product))
       .map((entry) => ({
         ...entry,
         timestamp: entry.timestamp,
@@ -3949,6 +4002,27 @@
   }
 
   $$("[data-action]").forEach((button) => button.addEventListener("click", () => handleAction(button.dataset.action)));
+  $$("[data-order-sort]").forEach((header) => {
+    header.tabIndex = 0;
+    header.addEventListener("click", () => {
+      orderSort = { key: header.dataset.orderSort, direction: "asc" };
+      renderOverview();
+      renderAllOrders();
+    });
+    header.addEventListener("dblclick", () => {
+      orderSort = { key: header.dataset.orderSort, direction: "desc" };
+      renderOverview();
+      renderAllOrders();
+    });
+    header.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      orderSort = { key: header.dataset.orderSort, direction: "asc" };
+      renderOverview();
+      renderAllOrders();
+    });
+  });
+  updateOrderSortHeaders();
   $$("[data-view]").forEach((link) => link.addEventListener("click", (event) => {
     event.preventDefault();
     setView(link.dataset.view);

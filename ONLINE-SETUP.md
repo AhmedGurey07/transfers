@@ -44,3 +44,16 @@ The Supabase URL and anon/publishable key are browser-visible identifiers, not p
 The first sign-in on each browser imports its saved orders that are not already online; existing online records win if an order ID already exists. Saved drivers are added if their names are not already present. Keep the old browser data until you verify the migrated orders on the online site.
 
 The local source-file sync is provided by `Start Order Desk.cmd`; it reads the warehouse workbook and calculator files for the running local web server.
+
+## Find Order Desk easily on a Windows PC
+
+### Local version
+
+1. Double-click `Install Order Desk.cmd` in the project folder.
+2. Open **SHAAFICI Order Desk** from the Desktop or Windows Start menu.
+
+These shortcuts open the online website in an app-style window without browser tabs or an address bar, and use the SHAAFICI logo. Microsoft Edge supplies the Windows web-app runtime; it does not open a normal browser window. The installer also attempts to pin the Start menu shortcut to the taskbar. If Windows does not allow automatic pinning, right-click **SHAAFICI Order Desk** in the Start menu and choose **Pin to taskbar**. To remove the shortcuts, delete **SHAAFICI Order Desk.lnk** from the Desktop and Start menu.
+
+### Online version
+
+After opening the published site in Microsoft Edge or Google Chrome, use the browser menu and choose **Install SHAAFICI Order Desk** (or **Apps → Install this site as an app**). This creates an app entry in Windows without requiring the project folder.

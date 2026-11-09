@@ -2335,21 +2335,35 @@
     }
 
     const exactQuantity = ordered / qtyItem;
+    const tileConverter = tileProduct
+      ? getTileConverter($(".product-input", row).value, qtyItemInput.value)
+      : null;
+    const tileQuantities = tileConverter ? convertTileArea(ordered, tileConverter) : null;
     const hasFiriQuantity = !tileProduct
       && quantityInputs.length > 1
       && getCatalogProduct($(".product-input", row).value)?.qtyItems?.length;
-    const calculatedQuantity = hasFiriQuantity
+    const calculatedQuantity = tileQuantities
+      ? tileQuantities[0].quantity
+      : hasFiriQuantity
       ? Math.floor(exactQuantity + Number.EPSILON)
       : Math.round(exactQuantity);
     const firiQuantity = hasFiriQuantity
       ? Math.max(0, Number((ordered - calculatedQuantity * qtyItem).toFixed(6)))
       : null;
-    quantityInput.value = String(calculatedQuantity);
+    const calculatedQuantities = tileQuantities || [
+      { quantity: calculatedQuantity }
+    ];
+    quantityInputs.forEach((input, index) => {
+      const quantity = calculatedQuantities[index];
+      if (quantity) input.value = String(quantity.quantity);
+    });
     if (hasFiriQuantity) quantityInputs[1].value = String(firiQuantity);
     row.dataset.autoCalculated = "true";
-    const autoValues = hasFiriQuantity ? [calculatedQuantity, firiQuantity] : [calculatedQuantity];
+    const autoValues = tileQuantities
+      ? tileQuantities.map(({ quantity }) => quantity)
+      : hasFiriQuantity ? [calculatedQuantity, firiQuantity] : [calculatedQuantity];
     row.dataset.autoCalculatedValues = JSON.stringify(autoValues.map(String));
-    if (tileProduct || hasFiriQuantity || Number.isInteger(exactQuantity)) {
+    if (tileQuantities || hasFiriQuantity || Number.isInteger(exactQuantity)) {
       message.hidden = true;
       message.textContent = "";
     } else {

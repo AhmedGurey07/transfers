@@ -158,18 +158,14 @@
     renderProductCatalogTable();
   }
 
-  function renderProductCatalogTable() {
+  function getFilteredCatalogRows() {
     const query = $("#catalog-search").value.trim().toLocaleLowerCase();
     const filterFields = [
       ["product", "PRODUCT"], ["quantities", "QUANTITY"], ["qtyItems", "Q/ITEM"],
       ["taken", "TAKEN"], ["rQuantities", "R/QUANTITY"], ["uomNs", "UOM/N"],
       ["unit", "UOM"], ["statuses", "STS"]
     ];
-    $("#catalog-headings").replaceChildren(
-      ...filterFields.map(([, label]) => Object.assign(document.createElement("th"), { textContent: label })),
-      Object.assign(document.createElement("th"), { innerHTML: '<span class="sr-only">Actions</span>' })
-    );
-    const filtered = productCatalog.filter((item) => {
+    return productCatalog.filter((item) => {
       const matchesSearch = `${item.product} ${(item.quantities || []).join(" ")} ${(item.qtyItems || []).join(" ")} ${(item.taken || []).join(" ")} ${(item.rQuantities || []).join(" ")} ${(item.uomNs || []).join(" ")} ${(item.statuses || []).join(" ")} ${item.unit}`
         .toLocaleLowerCase().includes(query);
       if (!matchesSearch) return false;
@@ -187,11 +183,11 @@
               : selected.operator === ">" ? number > target
                 : selected.operator === "<=" ? number <= target
                   : selected.operator === ">=" ? number >= target
-                      : selected.operator === "!=" ? number !== target
-                        : selected.operator === "between"
-                          ? number >= Math.min(target, Number(selected.second))
-                            && number <= Math.max(target, Number(selected.second))
-                          : number === target;
+                    : selected.operator === "!=" ? number !== target
+                      : selected.operator === "between"
+                        ? number >= Math.min(target, Number(selected.second))
+                          && number <= Math.max(target, Number(selected.second))
+                        : number === target;
           });
         }
         if (selected?.contains !== undefined) {
@@ -204,16 +200,32 @@
         return values.some((value) => selected.has(String(value || "—")));
       });
     });
+  }
+
+  function renderProductCatalogTable() {
+    const filterFields = [
+      ["product", "PRODUCT"], ["quantities", "QUANTITY"], ["qtyItems", "Q/ITEM"],
+      ["taken", "TAKEN"], ["rQuantities", "R/QUANTITY"], ["uomNs", "UOM/N"],
+      ["unit", "UOM"], ["statuses", "STS"]
+    ];
+    $("#catalog-headings").replaceChildren(
+      ...filterFields.map(([, label]) => Object.assign(document.createElement("th"), { textContent: label })),
+      Object.assign(document.createElement("th"), { innerHTML: '<span class="sr-only">Actions</span>' })
+    );
+    const filtered = getFilteredCatalogRows();
     const target = $("#catalog-products");
     target.replaceChildren(...filtered.map((item) => {
       const row = document.createElement("tr");
+      row.title = "Click to preview this product";
+      row.addEventListener("click", () => openCatalogPreview(item));
       const product = document.createElement("td");
       const productLink = document.createElement("button");
       productLink.type = "button";
       productLink.className = "catalog-product-history-link";
       productLink.textContent = item.product;
       productLink.title = "Show this product's history";
-      productLink.addEventListener("click", () => {
+      productLink.addEventListener("click", (event) => {
+        event.stopPropagation();
         itemHistoryProductFilter = item.product;
         $("#item-history-search").value = item.product;
         setView("item-history");
@@ -238,18 +250,25 @@
       edit.type = "button";
       edit.className = "order-action-button";
       edit.textContent = "Edit";
-      edit.addEventListener("click", () => beginCatalogEdit(productCatalog.indexOf(item)));
+      edit.addEventListener("click", (event) => {
+        event.stopPropagation();
+        beginCatalogEdit(productCatalog.indexOf(item));
+      });
       const add = document.createElement("button");
       add.type = "button";
       add.className = "order-action-button";
       add.textContent = "Add";
-      add.addEventListener("click", () => beginCatalogAdjustment(productCatalog.indexOf(item), 1));
+      add.addEventListener("click", (event) => {
+        event.stopPropagation();
+        beginCatalogAdjustment(productCatalog.indexOf(item), 1);
+      });
       const history = document.createElement("button");
       history.type = "button";
       history.className = "order-action-button";
       history.textContent = "History";
       history.title = "Show this product's item history";
-      history.addEventListener("click", () => {
+      history.addEventListener("click", (event) => {
+        event.stopPropagation();
         itemHistoryProductFilter = item.product;
         $("#item-history-search").value = item.product;
         setView("item-history");
@@ -260,6 +279,31 @@
     }));
     $("#catalog-view-count").textContent = filtered.length.toLocaleString("en");
     $("#catalog-empty").hidden = filtered.length > 0;
+  }
+
+  function openCatalogPreview(item) {
+    const details = [
+      ["Product", item.product],
+      ["Quantity", formatCatalogValues(item.quantities)],
+      ["Q/ITEM", formatCatalogValues(item.qtyItems)],
+      ["Taken", formatCatalogValues(item.taken)],
+      ["R/QUANTITY", formatCatalogValues(item.rQuantities)],
+      ["UOM/N", formatCatalogValues(item.uomNs)],
+      ["UOM", item.unit || "—"],
+      ["STS", formatCatalogValues(item.statuses)]
+    ];
+    $("#catalog-preview-title").textContent = item.product;
+    $("#catalog-preview-details").replaceChildren(...details.map(([label, value]) => {
+      const card = document.createElement("div");
+      card.append(Object.assign(document.createElement("span"), { textContent: label }));
+      card.append(Object.assign(document.createElement("strong"), { textContent: value }));
+      return card;
+    }));
+    $("#catalog-preview").hidden = false;
+  }
+
+  function closeCatalogPreview() {
+    $("#catalog-preview").hidden = true;
   }
 
   function formatCatalogNumber(value) {
@@ -285,6 +329,11 @@
       const operator = $(`[data-catalog-filter-operator='${input.dataset.catalogFilterValue}']`);
       if (operator) operator.value = current?.operator || "=";
     });
+    $$("[data-catalog-filter-second]").forEach((input) => {
+      const current = catalogValueFilters[input.dataset.catalogFilterSecond];
+      input.value = current?.second || "";
+      input.hidden = current?.operator !== "between";
+    });
     $$("[data-catalog-filter-input]").forEach((input) => {
       input.value = catalogValueFilters[input.dataset.catalogFilterInput]?.contains
         ? String(catalogValueFilters[input.dataset.catalogFilterInput].contains).toUpperCase()
@@ -298,7 +347,8 @@
       if (input.value === "") return;
       catalogValueFilters[input.dataset.catalogFilterValue] = {
         operator: $(`[data-catalog-filter-operator='${input.dataset.catalogFilterValue}']`).value,
-        value: input.value
+        value: input.value,
+        second: $(`[data-catalog-filter-second='${input.dataset.catalogFilterValue}']`)?.value || ""
       };
     });
     $$("[data-catalog-filter-input]").forEach((input) => {
@@ -773,7 +823,7 @@
   function exportCatalogToExcel() {
     const headers = ["PRODUCT / DESCRIPTION", "QUANTITY", "Q/ITEM", "TAKEN", "R/QUANTITY", "UOM/N", "UOM", "STS"];
     const valueForExcel = (value) => escapeAttribute(Array.isArray(value) ? value.join(", ") : value ?? "");
-    const rows = productCatalog.map((item) => [
+    const rows = getFilteredCatalogRows().map((item) => [
       item.product,
       item.quantities,
       item.qtyItems,
@@ -794,7 +844,7 @@
     link.download = `warehouse-catalog-${dateValue()}.xls`;
     link.click();
     URL.revokeObjectURL(url);
-    showToast(`${productCatalog.length.toLocaleString("en")} products exported to Excel.`);
+    showToast(`${rows.length.toLocaleString("en")} filtered products exported to Excel.`);
   }
 
   async function uploadWorkbook(file) {
@@ -3542,6 +3592,7 @@
       ...entry,
       orderId: order.id,
       customer: order.customer,
+      actor: entry.actor || normalizeCreatedBy(order.preparedBy) || "Unknown user",
       deleted: false
     }))).filter((entry) =>
       (!historyOrderFilter || entry.orderId === historyOrderFilter)
@@ -3551,13 +3602,17 @@
       const row = document.createElement("tr");
       const when = document.createElement("td");
       when.textContent = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(entry.timestamp);
+      const actor = document.createElement("td");
+      actor.textContent = entry.actor
+        ? `${entry.actor}${entry.actorEmail ? ` (${entry.actorEmail})` : ""}`
+        : entry.actorEmail || "Unknown user";
       const orderId = document.createElement("td");
       orderId.textContent = `${entry.orderId}${entry.deleted ? " (deleted)" : ""}`;
       const customer = document.createElement("td");
       customer.textContent = entry.customer || "—";
       const activity = document.createElement("td");
       activity.textContent = entry.details ? `${entry.action}: ${entry.details}` : entry.action;
-      row.append(when, orderId, customer, activity);
+      row.append(when, actor, orderId, customer, activity);
       return row;
     });
     $("#order-history").replaceChildren(...rows);
@@ -3685,7 +3740,7 @@
       .map((entry) => ({
         ...entry,
         timestamp: entry.timestamp,
-        reference: "Manual adjustment",
+        reference: entry.reference || "Manual adjustment",
         from: entry.amount > 0 ? "Manual adjustment" : "WH2/Warehouse 200k",
         to: entry.amount > 0 ? "WH2/Warehouse 200k" : "Manual adjustment",
         quantity: Math.abs(entry.amount),
@@ -3715,15 +3770,29 @@
       const date = entry.date && /^\d{4}-\d{2}-\d{2}$/.test(entry.date)
         ? `${entry.date} ${new Intl.DateTimeFormat("en", { timeStyle: "medium" }).format(entry.timestamp)}`
         : new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "medium" }).format(entry.timestamp);
-      [
-        date,
-        entry.reference,
+      const values = [
         entry.product,
         entry.from,
         entry.to,
         formatCatalogNumber(entry.quantity),
         entry.unit
-      ].forEach((value) => {
+      ];
+      const dateCell = document.createElement("td");
+      dateCell.textContent = date;
+      row.append(dateCell);
+      const referenceCell = document.createElement("td");
+      const referenceButton = document.createElement("button");
+      referenceButton.type = "button";
+      referenceButton.className = "item-history-reference-button";
+      referenceButton.textContent = entry.reference;
+      referenceButton.title = "Edit reference";
+      referenceButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        editItemHistoryReference(referenceCell, entry);
+      });
+      referenceCell.append(referenceButton);
+      row.append(referenceCell);
+      values.forEach((value) => {
         const cell = document.createElement("td");
         cell.textContent = value;
         if (entry.quantityHighlight && cell.cellIndex === 5) cell.classList.add("item-history-quantity");
@@ -3733,6 +3802,87 @@
     });
     $("#item-history").replaceChildren(...rows);
     $("#item-history-empty").hidden = entries.length > 0;
+  }
+
+  function editItemHistoryReference(cell, entry) {
+    if (cell.querySelector("input")) return;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "item-history-reference-input";
+    input.value = entry.reference || "";
+    input.maxLength = 120;
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "order-action-button";
+    save.textContent = "Save";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "order-action-button";
+    cancel.textContent = "Cancel";
+    const finish = (restore) => {
+      if (restore) {
+        cell.replaceChildren(Object.assign(document.createElement("button"), {
+          type: "button",
+          className: "item-history-reference-button",
+          textContent: entry.reference || "—"
+        }));
+        const button = cell.firstChild;
+        button.title = "Edit reference";
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          editItemHistoryReference(cell, entry);
+        });
+      } else {
+        renderItemHistory();
+      }
+    };
+    save.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const reference = input.value.trim();
+      if (!reference) {
+        showToast("Reference cannot be empty.");
+        input.focus();
+        return;
+      }
+      if (entry.orderId) {
+        const order = orders.find((candidate) => candidate.id === entry.orderId);
+        if (!order) {
+          showToast("The related order could not be found.");
+          return;
+        }
+        const previous = order.transferId;
+        order.transferId = reference;
+        if (!await persistOrders(order)) {
+          order.transferId = previous;
+          return;
+        }
+      } else if (entry.id) {
+        const adjustment = catalogAdjustments.find((candidate) => candidate.id === entry.id);
+        if (!adjustment) {
+          showToast("The adjustment could not be found.");
+          return;
+        }
+        const previous = adjustment.reference;
+        adjustment.reference = reference;
+        try {
+          await saveCatalogToCloud(currentCatalogData(), false);
+        } catch (error) {
+          adjustment.reference = previous;
+          console.error("Could not save item history reference.", error);
+          showToast(error.message || "Could not save the reference.");
+          return;
+        }
+      }
+      showToast("Reference updated.");
+      renderItemHistory();
+    });
+    cancel.addEventListener("click", (event) => {
+      event.stopPropagation();
+      finish(true);
+    });
+    cell.replaceChildren(input, save, cancel);
+    input.focus();
+    input.select();
   }
 
   function resetForm() {
@@ -3806,7 +3956,16 @@
 
   function recordOrderHistory(order, action, details = "", metadata = {}) {
     order.history = Array.isArray(order.history) ? order.history : [];
-    order.history.push({ timestamp: Date.now(), action, details, ...metadata });
+    const actor = cloudUser ? usernameForUser(cloudUser) : "";
+    const actorEmail = String(cloudUser?.email || "").trim();
+    order.history.push({
+      timestamp: Date.now(),
+      action,
+      details,
+      actor: actor || order.preparedBy || "Unknown user",
+      actorEmail,
+      ...metadata
+    });
   }
 
   function changedOrderFields(previous, next) {
@@ -4230,6 +4389,16 @@
   $("#catalog-search").addEventListener("input", renderProductCatalogTable);
   $("#catalog-filter-apply").addEventListener("click", applyCatalogFilterPanel);
   $("#catalog-filter-cancel").addEventListener("click", cancelCatalogFilterPanel);
+  $$("[data-catalog-filter-operator]").forEach((operator) => {
+    operator.addEventListener("change", () => {
+      const second = $(`[data-catalog-filter-second='${operator.dataset.catalogFilterOperator}']`);
+      if (second) second.hidden = operator.value !== "between";
+    });
+  });
+  $("#catalog-preview-close").addEventListener("click", closeCatalogPreview);
+  $("#catalog-preview").addEventListener("click", (event) => {
+    if (event.target.id === "catalog-preview") closeCatalogPreview();
+  });
   $$("[data-catalog-filter]").forEach((filter) => {
     filter.addEventListener("input", renderProductCatalogTable);
     filter.addEventListener("change", renderProductCatalogTable);

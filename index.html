@@ -128,11 +128,11 @@
       </section>
 
       <section class="view" id="catalog-view" aria-labelledby="catalog-title">
-        <div class="page-heading"><div><p class="eyebrow">WAREHOUSE WORKBOOK</p><h1 id="catalog-title">Product catalog</h1><p class="welcome-copy">Products and quantities loaded from the warehouse Excel workbook.</p></div><div class="catalog-actions"><button class="button button-secondary" type="button" id="add-catalog-product">Add product</button><button class="button button-secondary" type="button" id="export-catalog">Export Excel</button><button class="button button-secondary" type="button" id="upload-workbook">Upload Excel workbook</button><input id="workbook-file" type="file" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" hidden><span class="item-count"><span id="catalog-view-count">0</span> products</span></div></div>
+        <div class="page-heading"><div><p class="eyebrow">WAREHOUSE WORKBOOK</p><h1 id="catalog-title">Product catalog</h1><p class="welcome-copy">Products and quantities loaded from the warehouse Excel workbook.</p></div><div class="catalog-actions"><button class="button button-secondary" type="button" id="add-catalog-product">Add product</button><button class="button button-secondary" type="button" id="export-catalog">Export filtered data</button><button class="button button-secondary" type="button" id="upload-workbook">Upload Excel workbook</button><input id="workbook-file" type="file" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" hidden><span class="item-count"><span id="catalog-view-count">0</span> products</span></div></div>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="catalog-search" type="search" placeholder="Search product, code, unit, or quantity" aria-label="Search product catalog"></label></div>
         <div class="catalog-filter-panel" id="catalog-filter-panel" aria-label="Catalog filters">
           <div class="catalog-filter-fields">
-            <label><span>R/QUANTITY</span><div><select data-catalog-filter-operator="rQuantities"><option value="=">=</option><option value="!=">≠</option><option value=">">&gt;</option><option value=">=">&ge;</option><option value="<">&lt;</option><option value="<=">&le;</option></select><input data-catalog-filter-value="rQuantities" type="number" step="any" placeholder="Any"></div></label>
+            <label><span>R/QUANTITY</span><div><select data-catalog-filter-operator="rQuantities"><option value="=">=</option><option value="!=">≠</option><option value=">">&gt;</option><option value=">=">&ge;</option><option value="<">&lt;</option><option value="<=">&le;</option><option value="between">Between</option></select><input data-catalog-filter-value="rQuantities" type="number" step="any" placeholder="Any"><input data-catalog-filter-second="rQuantities" type="number" step="any" placeholder="And" hidden></div></label>
             <label><span>STS</span><select data-catalog-filter-input="statuses"><option value="">All statuses</option><option value="END">END</option><option value="DONE">DONE</option></select></label>
           </div>
           <div class="catalog-filter-actions"><button class="button button-primary" type="button" id="catalog-filter-apply">Apply</button><button class="button button-quiet" type="button" id="catalog-filter-cancel">Cancel</button></div>
@@ -160,13 +160,13 @@
           </div>
           <div class="form-actions"><span class="auth-status" id="catalog-adjust-status" role="status" aria-live="polite"></span><div><button class="button button-quiet" type="button" id="catalog-adjust-cancel">Cancel</button><button class="button button-primary" id="catalog-adjust-submit" type="submit">Save adjustment</button></div></div>
         </form>
-        <div class="table-card"><div class="table-scroll"><table><thead><tr id="catalog-headings"></tr></thead><tbody id="catalog-products"></tbody></table></div><div class="empty-state" id="catalog-empty" hidden><span class="empty-icon">⌕</span><strong>No matching products</strong><span>Try a different product name, code, quantity, or unit.</span></div></div>
+        <div class="table-card"><div class="table-scroll"><table class="catalog-table"><thead><tr id="catalog-headings"></tr></thead><tbody id="catalog-products"></tbody></table></div><div class="empty-state" id="catalog-empty" hidden><span class="empty-icon">⌕</span><strong>No matching products</strong><span>Try a different product name, code, quantity, or unit.</span></div></div>
       </section>
 
       <section class="view" id="history-view" aria-labelledby="history-title">
         <div class="page-heading"><div><p class="eyebrow">ORDER AUDIT TRAIL</p><h1 id="history-title">Order history</h1><p class="welcome-copy">Review order creation, edits, status changes, and deletions.</p></div><button class="button button-secondary" type="button" id="history-show-all">Show all history</button></div>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="history-search" type="search" placeholder="Search order, customer, or activity" aria-label="Search order history"></label><span id="history-filter-label" class="history-filter-label"></span></div>
-        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>WHEN</th><th>ORDER</th><th>CUSTOMER</th><th>ACTIVITY</th></tr></thead><tbody id="order-history"></tbody></table></div><div class="empty-state" id="history-empty"><span class="empty-icon">◷</span><strong>No history yet</strong><span>Order activity will appear here.</span></div></div>
+        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>WHEN</th><th>USER</th><th>ORDER</th><th>CUSTOMER</th><th>ACTIVITY</th></tr></thead><tbody id="order-history"></tbody></table></div><div class="empty-state" id="history-empty"><span class="empty-icon">◷</span><strong>No history yet</strong><span>Order activity will appear here.</span></div></div>
       </section>
 
       <section class="view" id="transfer-history-view" aria-labelledby="transfer-history-title">
@@ -358,6 +358,14 @@
     </main>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="catalog-preview-backdrop" id="catalog-preview" hidden>
+    <section class="catalog-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="catalog-preview-title">
+      <button class="catalog-preview-close" type="button" id="catalog-preview-close" aria-label="Close preview">×</button>
+      <p class="eyebrow">PRODUCT PREVIEW</p>
+      <h2 id="catalog-preview-title"></h2>
+      <div class="catalog-preview-grid" id="catalog-preview-details"></div>
+    </section>
+  </div>
   <datalist id="product-catalog"></datalist>
   <datalist id="saved-drivers"></datalist>
 </body>

@@ -12,7 +12,7 @@
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
-  <script src="app.js?v=202611100905" defer></script>
+  <script src="app.js?v=202611101003" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -176,7 +176,7 @@
       </section>
 
       <section class="view" id="item-history-view" aria-labelledby="item-history-title">
-        <div class="page-heading"><div><p class="eyebrow">RECENT PRODUCT MOVEMENT</p><h1 id="item-history-title">Item history</h1><p class="welcome-copy">Review item transfers created today and yesterday.</p></div></div>
+        <div class="page-heading"><div><p class="eyebrow">PRODUCT ACTIVITY</p><h1 id="item-history-title">Item history</h1><p class="welcome-copy">Review transfers, quantity adjustments, and catalog edits for each item.</p></div></div>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="item-history-search" type="search" placeholder="Search reference, product, customer, or branch" aria-label="Search item history"></label></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>REFERENCE</th><th>PRODUCT</th><th>FROM</th><th>TO</th><th>QUANTITY</th><th>UNIT</th></tr></thead><tbody id="item-history"></tbody></table></div><div class="empty-state" id="item-history-empty"><span class="empty-icon">▤</span><strong>No item history yet</strong><span>Saved transfer items will appear here.</span></div></div>
       </section>

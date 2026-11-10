@@ -347,6 +347,7 @@ form button { font-size: 12px; }
 .items-table tr.conversion-insertion-target td { background: #f5faf5; }
 .items-table tr.conversion-insertion-target .item-index-button { border-color: var(--green); color: #fff; background: var(--green); }
 .item-input { width: 100%; height: 31px; border: 1px solid #e8ebe6; border-radius: 4px; padding: 0 7px; outline: none; color: #465146; background: #fff; font-size: 9px; }
+.product-input { height: auto; min-height: 52px; padding: 7px; resize: vertical; line-height: 1.35; }
 .item-input::placeholder { color: #b0b8ae; }
 .quantity-pairs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .quantity-pair { display: flex; gap: 5px; }

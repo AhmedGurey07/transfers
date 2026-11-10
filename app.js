@@ -124,6 +124,7 @@
   let editingCatalogIndex = -1;
   let adjustingCatalogIndex = -1;
   let catalogAdjustments = [];
+  let catalogEditHistory = [];
   let orderFormSnapshot = "";
   function indexProductCatalog() {
     productsByName.clear();
@@ -593,18 +594,45 @@
       uomNs: splitCatalogValues($("#catalog-edit-uom-ns").value),
       statuses: splitCatalogValues($("#catalog-edit-statuses").value)
     };
+    const historyValue = (value) => Array.isArray(value)
+      ? value.map(formatCatalogNumber).join(", ")
+      : String(value ?? "");
+    const changedFields = isNewProduct ? [] : [
+      ["product", "Product / description"],
+      ["quantities", "Quantity"],
+      ["qtyItems", "Q/ITEM"],
+      ["taken", "Taken"],
+      ["rQuantities", "R/QUANTITY"],
+      ["uomNs", "UOM/N"],
+      ["unit", "UOM"],
+      ["statuses", "STS"]
+    ].flatMap(([field, label]) => {
+      const before = historyValue(previous[field]);
+      const after = historyValue(updatedProduct[field]);
+      return before === after ? [] : [{ field: label, before, after }];
+    });
+    const editEntry = changedFields.length ? {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      timestamp: Date.now(),
+      product: updatedProduct.product,
+      previousProduct: previous.product,
+      changes: changedFields
+    } : null;
     if (editingCatalogIndex < 0) productCatalog.push(updatedProduct);
     else productCatalog[editingCatalogIndex] = updatedProduct;
+    if (editEntry) catalogEditHistory = [...catalogEditHistory, editEntry];
     try {
       await saveCatalogToCloud(currentCatalogData());
       indexProductCatalog();
       renderProductCatalogOptions();
+      renderItemHistory();
       refreshPreview();
       closeCatalogEdit();
       showToast(isNewProduct ? "Product added to the catalog." : "Product catalog updated.");
     } catch (error) {
       if (editingCatalogIndex < 0) productCatalog.pop();
       else productCatalog[editingCatalogIndex] = previous;
+      if (editEntry) catalogEditHistory = catalogEditHistory.filter((entry) => entry.id !== editEntry.id);
       console.error("Could not save the catalog product.", error);
       $("#catalog-edit-status").textContent = error.message || "Could not save catalog changes.";
       $("#catalog-edit-status").classList.add("error");
@@ -723,6 +751,7 @@
     }
     productCatalog = data.products;
     if (Array.isArray(data.adjustments)) catalogAdjustments = data.adjustments;
+    if (Array.isArray(data.catalogEditHistory)) catalogEditHistory = data.catalogEditHistory;
     window.AHMED_GUREY_PRODUCTS = productCatalog;
     indexProductCatalog();
     Object.keys(converters).forEach((key) => {
@@ -760,7 +789,8 @@
       })),
       converters,
       gypsumConverters,
-      adjustments: catalogAdjustments
+      adjustments: catalogAdjustments,
+      catalogEditHistory
     };
   }
 
@@ -2231,7 +2261,7 @@
       <td class="item-details" colspan="2">
         <div class="item-entry-layout">
           <div class="item-product-row">
-            <label class="item-product-field"><span>PRODUCT / DESCRIPTION</span><input class="item-input product-input" aria-label="Product description" list="product-catalog" autocomplete="off" maxlength="120" placeholder="Search warehouse items or type a product" value="${escapeAttribute(item.product || "")}"></label>
+            <label class="item-product-field"><span>PRODUCT / DESCRIPTION</span><textarea class="item-input product-input" aria-label="Product description" maxlength="240" rows="2" placeholder="Search warehouse items or type a product">${escapeAttribute(item.product || "")}</textarea></label>
             <label class="item-ordered-field"><span>ORDERED</span><input class="item-input ordered-input" aria-label="Ordered" type="number" min="0" step="any" placeholder="0" value="${escapeAttribute(item.ordered ?? "")}"></label>
             <label class="item-qty-item-field"><span>QTY/ITEM</span><span class="qty-item-control"></span></label>
           </div>
@@ -3917,25 +3947,43 @@
         quantityHighlight: true,
         adjustmentDirection: entry.amount > 0 ? "added" : "subtracted"
       }));
-    const entries = [...orderEntries, ...adjustmentEntries]
-      .filter((entry) => `${entry.reference} ${entry.product} ${entry.from} ${entry.to} ${entry.reason || ""}`.toLowerCase().includes(query))
+    const catalogEditEntries = catalogEditHistory
+      .filter((entry) => matchesItemHistoryProduct(entry.product)
+        || matchesItemHistoryProduct(entry.previousProduct))
+      .flatMap((entry) => (entry.changes || []).map((change) => ({
+        id: entry.id,
+        timestamp: entry.timestamp,
+        product: entry.product,
+        previousProduct: entry.previousProduct,
+        reference: `Catalog edit: ${change.field}`,
+        from: change.before || "—",
+        to: change.after || "—",
+        quantity: "—",
+        unit: "—",
+        catalogEdit: true
+      })));
+    const entries = [...orderEntries, ...adjustmentEntries, ...catalogEditEntries]
+      .filter((entry) => `${entry.reference} ${entry.product} ${entry.previousProduct || ""} ${entry.from} ${entry.to} ${entry.reason || ""}`.toLowerCase().includes(query))
       .sort((left, right) => right.timestamp - left.timestamp);
     const rows = entries.map((entry) => {
       const row = document.createElement("tr");
       if (entry.warehouseTransfer) row.classList.add("warehouse-transfer-row");
       if (entry.adjustmentDirection) row.classList.add(`manual-adjustment-${entry.adjustmentDirection}`);
-      row.classList.add("clickable-history-row");
-      row.tabIndex = 0;
-      row.setAttribute("role", "button");
-      row.setAttribute("aria-label", `Open transfer ${entry.reference}`);
+      if (entry.catalogEdit) row.classList.add("catalog-edit-history-row");
       const openOrder = () => editOrder(entry.orderId);
-      if (entry.orderId) row.addEventListener("click", openOrder);
-      row.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          if (entry.orderId) openOrder();
-        }
-      });
+      if (entry.orderId) {
+        row.classList.add("clickable-history-row");
+        row.tabIndex = 0;
+        row.setAttribute("role", "button");
+        row.setAttribute("aria-label", `Open transfer ${entry.reference}`);
+        row.addEventListener("click", openOrder);
+        row.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openOrder();
+          }
+        });
+      }
       const date = entry.date && /^\d{4}-\d{2}-\d{2}$/.test(entry.date)
         ? `${entry.date} ${new Intl.DateTimeFormat("en", { timeStyle: "medium" }).format(entry.timestamp)}`
         : new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "medium" }).format(entry.timestamp);
@@ -3950,16 +3998,20 @@
       dateCell.textContent = date;
       row.append(dateCell);
       const referenceCell = document.createElement("td");
-      const referenceButton = document.createElement("button");
-      referenceButton.type = "button";
-      referenceButton.className = "item-history-reference-button";
-      referenceButton.textContent = entry.reference;
-      referenceButton.title = "Edit reference";
-      referenceButton.addEventListener("click", (event) => {
-        event.stopPropagation();
-        editItemHistoryReference(referenceCell, entry);
-      });
-      referenceCell.append(referenceButton);
+      if (entry.catalogEdit) {
+        referenceCell.textContent = entry.reference;
+      } else {
+        const referenceButton = document.createElement("button");
+        referenceButton.type = "button";
+        referenceButton.className = "item-history-reference-button";
+        referenceButton.textContent = entry.reference;
+        referenceButton.title = "Edit reference";
+        referenceButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          editItemHistoryReference(referenceCell, entry);
+        });
+        referenceCell.append(referenceButton);
+      }
       row.append(referenceCell);
       values.forEach((value) => {
         const cell = document.createElement("td");

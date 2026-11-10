@@ -56,7 +56,8 @@
     </form>
   </section>
   <div class="app-shell" id="app-shell" hidden>
-    <aside class="sidebar">
+    <button class="mobile-nav-backdrop" id="mobile-nav-backdrop" type="button" aria-label="Close navigation" hidden></button>
+    <aside class="sidebar" id="app-sidebar">
       <a class="brand" href="#" aria-label="SHAAFICI Order Desk home">
         <img class="brand-logo" src="shaafici-warehouse-200-logo.png" alt="SHAAFICI Warehouse 200">
       </a>
@@ -87,6 +88,12 @@
 
     <main class="main-content">
       <header class="topbar">
+        <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button" aria-label="Open menu" aria-controls="app-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        <button class="app-back-button" id="app-back-button" type="button" aria-label="Go back" title="Go back" hidden>
+          <span aria-hidden="true">←</span><span>Back</span>
+        </button>
         <div class="breadcrumb"><span>Workspace</span><span class="crumb-slash">/</span><strong id="breadcrumb-current">Overview</strong></div>
         <div class="topbar-actions"><span class="today-label" id="today-label"></span><button class="avatar" id="account-avatar" type="button" aria-label="Open your profile"><span id="account-avatar-initials">AG</span><img id="account-avatar-image" alt="" hidden></button></div>
       </header>

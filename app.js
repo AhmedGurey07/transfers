@@ -125,6 +125,7 @@
   let adjustingCatalogIndex = -1;
   let catalogAdjustments = [];
   let catalogEditHistory = [];
+  let viewHistory = [];
   let orderFormSnapshot = "";
   function indexProductCatalog() {
     productsByName.clear();
@@ -250,7 +251,9 @@
       const edit = document.createElement("button");
       edit.type = "button";
       edit.className = "order-action-button";
-      edit.textContent = "Edit";
+      edit.setAttribute("aria-label", "Edit product");
+      edit.title = "Edit product";
+      edit.innerHTML = '<span class="sr-only">Edit</span>';
       edit.addEventListener("click", (event) => {
         event.stopPropagation();
         beginCatalogEdit(productCatalog.indexOf(item));
@@ -258,7 +261,9 @@
       const add = document.createElement("button");
       add.type = "button";
       add.className = "order-action-button";
-      add.textContent = "Add";
+      add.setAttribute("aria-label", "Add quantity");
+      add.title = "Add quantity";
+      add.innerHTML = '<span class="sr-only">Add</span>';
       add.addEventListener("click", (event) => {
         event.stopPropagation();
         beginCatalogAdjustment(productCatalog.indexOf(item), 1);
@@ -266,8 +271,9 @@
       const history = document.createElement("button");
       history.type = "button";
       history.className = "order-action-button";
-      history.textContent = "History";
+      history.setAttribute("aria-label", "View product history");
       history.title = "Show this product's item history";
+      history.innerHTML = '<span class="sr-only">History</span>';
       history.addEventListener("click", (event) => {
         event.stopPropagation();
         itemHistoryProductFilter = item.product;
@@ -278,8 +284,23 @@
       row.append(product, quantity, qtyItem, taken, rQuantity, uomN, unit, status, actions);
       return row;
     }));
+    labelTableRows(target);
     $("#catalog-view-count").textContent = filtered.length.toLocaleString("en");
     $("#catalog-empty").hidden = filtered.length > 0;
+  }
+
+  function labelTableRows(tbody) {
+    const headerCells = [...tbody.closest("table").querySelectorAll("thead th")];
+    const headers = headerCells.map((header) => {
+      const label = header.textContent.trim().replace(/\s+/g, " ");
+      header.title = label;
+      return label;
+    });
+    tbody.querySelectorAll("tr").forEach((row) => {
+      [...row.cells].forEach((cell, index) => {
+        cell.dataset.label = headers[index] || "";
+      });
+    });
   }
 
   function openCatalogPreview(item) {
@@ -2232,16 +2253,20 @@
     }
   }
 
-  function setView(name) {
+  function setView(name, { recordHistory = true, confirmUnsaved = true } = {}) {
     if (name !== "new-order" && $("#new-order-view").classList.contains("active")
-      && !confirmDiscardUnsavedOrder()) return;
+      && confirmUnsaved && !confirmDiscardUnsavedOrder()) return false;
+    closeMobileNavigation();
     if (name === "users" && !["owner", "admin"].includes(cloudRole)) {
       showToast("Only workspace admins can manage users.");
       name = "overview";
     }
     if (name === "profile" && (!cloudDeployment || !cloudUser)) name = "overview";
+    const activeView = $(".view.active")?.id.replace(/-view$/, "");
+    if (recordHistory && activeView && activeView !== name) viewHistory.push(activeView);
     $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${name}-view`));
     $$("[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === name));
+    $("#app-back-button").hidden = name === "overview";
     const labels = { overview: "Overview", orders: "All orders", catalog: "Product catalog", history: "Order history", "transfer-history": "Transfer history", "item-history": "Item history", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
     $("#breadcrumb-current").textContent = labels[name] || "Overview";
     if (name === "orders") renderAllOrders();
@@ -2252,6 +2277,15 @@
     if (name === "users" && ["owner", "admin"].includes(cloudRole)) loadWorkspaceUsers();
     if (name === "profile") prepareProfileForm();
     window.scrollTo({ top: 0, behavior: "smooth" });
+    return true;
+  }
+
+  function navigateBack() {
+    if ($("#new-order-view").classList.contains("active") && !confirmDiscardUnsavedOrder()) return;
+    const currentView = $(".view.active")?.id.replace(/-view$/, "");
+    let previousView = viewHistory.pop();
+    while (previousView && previousView === currentView) previousView = viewHistory.pop();
+    setView(previousView || "overview", { recordHistory: false, confirmUnsaved: false });
   }
 
   function createItemRow(item = {}, { preserveQuantities = false, afterRow = null } = {}) {
@@ -3757,6 +3791,7 @@
     $("#nav-order-count").textContent = String(activeOrders.length);
     const target = $("#recent-orders");
     target.replaceChildren(...sorted.slice(0, 5).map(orderRow));
+    labelTableRows(target);
     $("#recent-empty").hidden = sorted.length > 0;
   }
 
@@ -3771,6 +3806,7 @@
     );
     const target = $("#all-orders");
     target.replaceChildren(...filtered.map(orderRow));
+    labelTableRows(target);
     $("#orders-empty").hidden = filtered.length > 0;
     updateOrderSortHeaders();
   }
@@ -3815,6 +3851,7 @@
       return row;
     });
     $("#order-history").replaceChildren(...rows);
+    labelTableRows($("#order-history"));
     $("#history-empty").hidden = entries.length > 0;
   }
 
@@ -3889,6 +3926,7 @@
       return row;
     });
     $("#transfer-history").replaceChildren(...rows);
+    labelTableRows($("#transfer-history"));
     $("#transfer-history-empty").hidden = entries.length > 0;
   }
 
@@ -4022,6 +4060,7 @@
       return row;
     });
     $("#item-history").replaceChildren(...rows);
+    labelTableRows($("#item-history"));
     $("#item-history-empty").hidden = entries.length > 0;
   }
 
@@ -4382,6 +4421,30 @@
   }
 
   $$("[data-action]").forEach((button) => button.addEventListener("click", () => handleAction(button.dataset.action)));
+  $("#app-back-button").addEventListener("click", navigateBack);
+  function setMobileNavigationOpen(open) {
+    const shell = $("#app-shell");
+    const toggle = $("#mobile-menu-toggle");
+    const backdrop = $("#mobile-nav-backdrop");
+    shell.classList.toggle("mobile-nav-open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    backdrop.hidden = !open;
+    document.body.classList.toggle("mobile-nav-open", open);
+  }
+  function closeMobileNavigation() {
+    setMobileNavigationOpen(false);
+  }
+  $("#mobile-menu-toggle").addEventListener("click", () => {
+    setMobileNavigationOpen(!$("#app-shell").classList.contains("mobile-nav-open"));
+  });
+  $("#mobile-nav-backdrop").addEventListener("click", closeMobileNavigation);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && $("#app-shell").classList.contains("mobile-nav-open")) {
+      closeMobileNavigation();
+      $("#mobile-menu-toggle").focus();
+    }
+  });
   $$("[data-order-sort]").forEach((header) => {
     header.tabIndex = 0;
     header.addEventListener("click", () => {

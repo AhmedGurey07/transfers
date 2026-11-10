@@ -3062,6 +3062,8 @@
   }
 
   async function takeReceiptScreenshot() {
+    return takeReceiptScreenshotPreview();
+
     if (!printPreviewOrder) throw new Error("There is no order to capture.");
     if (!navigator.clipboard?.write || typeof ClipboardItem !== "function") {
       throw new Error("Image clipboard access is unavailable. Allow clipboard access in Firefox, then try again.");
@@ -3333,7 +3335,7 @@
     */
   }
 
-  async function takeReceiptScreenshotPreviewUnused() {
+  async function takeReceiptScreenshotPreview() {
     if (!printPreviewOrder) throw new Error("There is no order to capture.");
     if (!navigator.clipboard?.write || typeof ClipboardItem !== "function") {
       throw new Error("Image clipboard access is unavailable. Allow clipboard access in Firefox, then try again.");
@@ -3392,10 +3394,13 @@
         image.onload = resolve;
         image.onerror = () => reject(new Error("Could not render the print preview screenshot."));
       });
-      const scale = Math.min(4, Math.max(2, 2400 / width));
+      const scale = Math.min(10, Math.max(2, 3200 / width));
       const canvas = document.createElement("canvas");
       canvas.width = Math.ceil(width * scale);
       canvas.height = Math.ceil(height * scale);
+      if (canvas.width > 32767 || canvas.height > 32767) {
+        throw new Error("This receipt is too long to capture at high resolution.");
+      }
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Could not create the screenshot image.");
       context.imageSmoothingEnabled = true;

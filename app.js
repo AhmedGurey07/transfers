@@ -3062,8 +3062,9 @@
   }
 
   async function takeReceiptScreenshot() {
-    return takeReceiptScreenshotPreview();
+    return takeReceiptScreenshotReceiptCanvas();
 
+    /*
     if (!printPreviewOrder) throw new Error("There is no order to capture.");
     if (!navigator.clipboard?.write || typeof ClipboardItem !== "function") {
       throw new Error("Image clipboard access is unavailable. Allow clipboard access in Firefox, then try again.");
@@ -3166,7 +3167,6 @@
     await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
     return true;
 
-    /*
     const order = printPreviewOrder;
     const width = 302;
     const scale = 2;
@@ -3333,6 +3333,170 @@
     await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
     return true;
     */
+  }
+
+  async function takeReceiptScreenshotReceiptCanvas() {
+    if (!printPreviewOrder) throw new Error("There is no order to capture.");
+    if (!navigator.clipboard?.write || typeof ClipboardItem !== "function") {
+      throw new Error("Image clipboard access is unavailable. Allow clipboard access in Firefox, then try again.");
+    }
+
+    const order = printPreviewOrder;
+    const width = 302;
+    const scale = 2;
+    const padding = 12;
+    const contentWidth = width - padding * 2;
+    const canvas = document.createElement("canvas");
+    const measure = canvas.getContext("2d");
+    if (!measure) throw new Error("Could not create the screenshot image.");
+
+    const wrap = (value, font, maxWidth) => {
+      measure.font = font;
+      const lines = [];
+      let line = "";
+      String(value || "-").split(/\s+/).forEach((word) => {
+        const candidate = line ? `${line} ${word}` : word;
+        if (line && measure.measureText(candidate).width > maxWidth) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = candidate;
+        }
+      });
+      if (line) lines.push(line);
+      return lines;
+    };
+
+    const fields = [
+      ["ORDER DATE", formatDate(order.date)],
+      ["CUSTOMER / COMPANY", order.customer],
+      ["DELIVERED BY", order.driver],
+      ["BRANCH", order.branch],
+      ["DRIVER PHONE", order.driverPhone],
+      ["TRANSFER ID", order.transferId]
+    ].filter(([, value]) => value);
+    const columnGap = 10;
+    const columnWidth = (contentWidth - columnGap) / 2;
+    const fieldRows = [];
+    for (let index = 0; index < fields.length; index += 2) {
+      const row = fields.slice(index, index + 2).map(([label, value]) => ({
+        label,
+        lines: wrap(value, "600 12px Arial", columnWidth - 8)
+      }));
+      fieldRows.push({
+        fields: row,
+        height: Math.max(...row.map((field) => 11 + field.lines.length * 15 + 3))
+      });
+    }
+
+    const itemRows = order.items.map((item, index) => {
+      const productLines = wrap(item.product, "600 13px Arial", contentWidth - 76).slice(0, 2);
+      const orderedLines = item.ordered === "" || item.ordered == null
+        ? []
+        : wrap(String(item.ordered), "9px Arial", contentWidth - 76).slice(0, 1);
+      const quantities = (item.quantities || [{ quantity: item.quantity, unit: item.unit }])
+        .filter((pair) => Number(pair.quantity) > 0)
+        .map((pair) => `${pair.quantity} ${pair.unit}`)
+        .join(" · ") || "No quantity";
+      return {
+        index: index + 1,
+        productLines,
+        orderedLines,
+        quantityLines: wrap(quantities, "600 11px Arial", 58),
+        height: Math.max(productLines.length * 17 + orderedLines.length * 13, quantities.length ? 17 : 0) + 14
+      };
+    });
+
+    let height = 16;
+    fieldRows.forEach((row) => { height += row.height + 7; });
+    height += 6 + 26;
+    itemRows.forEach((row) => { height += row.height; });
+    if (order.notes) height += 10 + wrap(`Notes: ${order.notes}`, "11px Arial", contentWidth).length * 15;
+    if (order.preparedBy) height += 20 + 11 + 4 + wrap(order.preparedBy, "600 11px Arial", contentWidth).length * 14;
+    if (height * scale > 32767) throw new Error("This receipt is too long to capture as one image.");
+
+    canvas.width = width * scale;
+    canvas.height = Math.ceil(height * scale);
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not create the screenshot image.");
+    context.scale(scale, scale);
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, width, height);
+    context.textBaseline = "top";
+    let y = 16;
+
+    fieldRows.forEach((row) => {
+      row.fields.forEach((field, index) => {
+        const x = padding + index * (columnWidth + columnGap);
+        context.textAlign = "center";
+        context.fillStyle = "#333";
+        context.font = "700 8px Arial";
+        context.fillText(field.label, x + columnWidth / 2, y);
+        context.fillStyle = "#111";
+        context.font = "600 12px Arial";
+        field.lines.forEach((line, lineIndex) => {
+          context.fillText(line, x + columnWidth / 2, y + 14 + lineIndex * 15);
+        });
+      });
+      y += row.height + 7;
+    });
+
+    context.fillStyle = "#f0f0f0";
+    context.fillRect(padding, y, contentWidth, 26);
+    context.fillStyle = "#111";
+    context.font = "700 8px Arial";
+    context.textAlign = "center";
+    context.fillText("#", padding + 11, y + 8);
+    context.textAlign = "left";
+    context.fillText("PRODUCT / DESCRIPTION", padding + 24, y + 8);
+    y += 26;
+
+    itemRows.forEach((row) => {
+      const rowTop = y;
+      context.fillStyle = "#111";
+      context.font = "500 10px Arial";
+      context.textAlign = "center";
+      context.fillText(String(row.index), padding + 11, rowTop + 8);
+      context.textAlign = "left";
+      context.font = "600 13px Arial";
+      row.productLines.forEach((line, index) => context.fillText(line, padding + 24, rowTop + 8 + index * 17));
+      context.fillStyle = "#333";
+      context.font = "9px Arial";
+      row.orderedLines.forEach((line, index) => context.fillText(line, padding + 24, rowTop + 8 + row.productLines.length * 17 + index * 13));
+      context.fillStyle = "#111";
+      context.font = "600 11px Arial";
+      context.textAlign = "right";
+      row.quantityLines.forEach((line, index) => context.fillText(line, width - padding - 4, rowTop + 8 + index * 15));
+      context.fillStyle = "#777";
+      context.fillRect(padding, rowTop + row.height - 1, contentWidth, 1);
+      y += row.height;
+    });
+
+    if (order.notes) {
+      y += 10;
+      context.fillStyle = "#111";
+      context.font = "11px Arial";
+      context.textAlign = "left";
+      wrap(`Notes: ${order.notes}`, "11px Arial", contentWidth)
+        .forEach((line, index) => context.fillText(line, padding, y + index * 15));
+    }
+    if (order.preparedBy) {
+      y += order.notes ? 20 : 10;
+      context.fillStyle = "#777";
+      context.font = "700 8px Arial";
+      context.textAlign = "right";
+      context.fillText("CREATED BY", width - padding, y);
+      context.fillStyle = "#111";
+      context.font = "600 11px Arial";
+      wrap(order.preparedBy, "600 11px Arial", contentWidth)
+        .forEach((line, index) => context.fillText(line, width - padding, y + 15 + index * 14));
+    }
+
+    const png = new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not encode the screenshot image.")), "image/png");
+    });
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+    return true;
   }
 
   async function takeReceiptScreenshotPreview() {

@@ -2550,16 +2550,55 @@
   }
 
   function renderSavedDrivers() {
-    const list = $("#saved-drivers");
-    list.replaceChildren(...drivers.map((driver) => {
-      const option = document.createElement("option");
-      option.value = driver.name;
-      option.label = driver.phone;
-      return option;
-    }));
     $("#drivers-status").textContent = drivers.length
       ? `${drivers.length} ${drivers.length === 1 ? "driver" : "drivers"} saved`
       : "No drivers saved yet.";
+    const suggestions = $("#saved-driver-options");
+    if (!suggestions.hidden) renderDriverSuggestions($("#order-driver").value);
+  }
+
+  function renderDriverSuggestions(query = "") {
+    const input = $("#order-driver");
+    const list = $("#saved-driver-options");
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const matchingDrivers = drivers.filter((driver) =>
+      `${driver.name} ${driver.phone}`.toLocaleLowerCase().includes(normalizedQuery)
+    );
+    list.replaceChildren();
+    if (!matchingDrivers.length) {
+      const empty = document.createElement("div");
+      empty.className = "driver-suggestions-empty";
+      empty.textContent = drivers.length ? "No matching saved drivers." : "No saved drivers yet.";
+      list.append(empty);
+    } else {
+      matchingDrivers.forEach((driver) => {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "driver-suggestion";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", "false");
+        const name = document.createElement("strong");
+        name.textContent = driver.name;
+        const phone = document.createElement("span");
+        phone.textContent = driver.phone;
+        option.append(name, phone);
+        option.addEventListener("click", () => {
+          input.value = driver.name;
+          $("#driver-phone").value = driver.phone;
+          hideDriverSuggestions();
+          refreshPreview();
+          input.focus();
+        });
+        list.append(option);
+      });
+    }
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  }
+
+  function hideDriverSuggestions() {
+    $("#saved-driver-options").hidden = true;
+    $("#order-driver").setAttribute("aria-expanded", "false");
   }
 
   function fillSavedDriverPhone() {
@@ -4402,23 +4441,10 @@
       preparedBy: data.get("preparedBy").trim(),
       notes: data.get("notes").trim(),
       status: editingId ? normalizeOrderStatus(previousOrder?.status) : "Pending",
-      approvalStatus: $("#order-request-approval").checked && previousOrder?.approvalStatus !== "approved"
-        ? "pending" : previousOrder?.approvalStatus || "",
-      approvalRequestedBy: $("#order-request-approval").checked && previousOrder?.approvalStatus !== "approved"
-        ? previousOrder?.approvalStatus === "pending"
-          ? previousOrder.approvalRequestedBy || usernameForUser(cloudUser)
-          : usernameForUser(cloudUser)
-        : previousOrder?.approvalRequestedBy || "",
-      approvalRequestedById: $("#order-request-approval").checked && previousOrder?.approvalStatus !== "approved"
-        ? previousOrder?.approvalStatus === "pending"
-          ? previousOrder.approvalRequestedById || cloudUser?.id || ""
-          : cloudUser?.id || ""
-        : previousOrder?.approvalRequestedById || "",
-      approvalRequestedAt: $("#order-request-approval").checked && previousOrder?.approvalStatus !== "approved"
-        ? previousOrder?.approvalStatus === "pending"
-          ? previousOrder.approvalRequestedAt || Date.now()
-          : Date.now()
-        : previousOrder?.approvalRequestedAt || 0,
+      approvalStatus: previousOrder?.approvalStatus || "",
+      approvalRequestedBy: previousOrder?.approvalRequestedBy || "",
+      approvalRequestedById: previousOrder?.approvalRequestedById || "",
+      approvalRequestedAt: previousOrder?.approvalRequestedAt || 0,
       items: getItems(),
       createdAt: editingId ? previousOrder?.createdAt || Date.now() : Date.now()
     };
@@ -4436,7 +4462,6 @@
       driverPhone: data.get("driverPhone"),
       preparedBy: data.get("preparedBy"),
       notes: data.get("notes"),
-      requestApproval: $("#order-request-approval").checked,
       items: getItems()
     });
   }
@@ -5301,7 +5326,6 @@
   function resetForm() {
     form.reset();
     editingId = null;
-    $("#order-request-approval").disabled = false;
     converterPinnedOpen = false;
     form.elements.preparedBy.value = currentPreparedBy;
     $("#order-date").value = dateValue();
@@ -5356,8 +5380,6 @@
     form.elements.transferId.value = order.transferId || "";
     form.elements.date.value = order.date;
     form.elements.driver.value = order.driver || "";
-    $("#order-request-approval").checked = order.approvalStatus === "pending";
-    $("#order-request-approval").disabled = order.approvalStatus === "approved";
     form.elements.driverPhone.value = order.driverPhone || "";
     form.elements.preparedBy.value = normalizeCreatedBy(order.preparedBy);
     form.elements.notes.value = order.notes || "";
@@ -5473,9 +5495,6 @@
         recordOrderHistory(order, "Status changed", `${previousOrder.status} → ${order.status}.`);
       }
     } else recordOrderHistory(order, "Order created", "Order saved.");
-    if (pendingApproval && previousOrder?.approvalStatus !== "pending") {
-      recordOrderHistory(order, "Approval requested", "Order submitted for admin approval.");
-    }
     orders = [...orders];
     if (index >= 0) orders[index] = order;
     else orders.push(order);
@@ -5737,8 +5756,31 @@
     event.target.value = "";
   });
   $("#save-driver").addEventListener("click", saveDriver);
-  $("#order-driver").addEventListener("input", fillSavedDriverPhone);
+  $("#order-driver").addEventListener("focus", () => renderDriverSuggestions($("#order-driver").value));
+  $("#order-driver").addEventListener("click", () => renderDriverSuggestions($("#order-driver").value));
+  $("#order-driver").addEventListener("input", () => {
+    fillSavedDriverPhone();
+    renderDriverSuggestions($("#order-driver").value);
+  });
   $("#order-driver").addEventListener("change", fillSavedDriverPhone);
+  $(".driver-autocomplete").addEventListener("keydown", (event) => {
+    const options = $$(".driver-suggestion", $("#saved-driver-options"));
+    const currentIndex = options.indexOf(document.activeElement);
+    if (event.key === "Escape") {
+      hideDriverSuggestions();
+      $("#order-driver").focus();
+    } else if (event.key === "ArrowDown" && options.length) {
+      event.preventDefault();
+      options[Math.min(currentIndex + 1, options.length - 1)].focus();
+    } else if (event.key === "ArrowUp" && options.length) {
+      event.preventDefault();
+      if (currentIndex <= 0) $("#order-driver").focus();
+      else options[currentIndex - 1].focus();
+    }
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!$(".driver-autocomplete").contains(event.target)) hideDriverSuggestions();
+  });
   $("#order-pdf-file").addEventListener("change", (event) => {
     const file = event.target.files[0];
     if (file) importOrderPdf(file);
@@ -5957,7 +5999,6 @@
     $("#users-nav-link").hidden = !cloudDeployment || !["owner", "admin"].includes(cloudRole);
     $("#add-catalog-product").hidden = cloudDeployment && cloudRole === "staff";
     $("#upload-workbook").hidden = cloudDeployment && cloudRole === "staff";
-    $("#order-request-approval").closest(".field").hidden = !cloudDeployment;
     $("#approvals-panel").hidden = !cloudDeployment;
     $("#account-avatar").hidden = !cloudDeployment;
     renderAccountAvatar(cloudUser);

@@ -373,6 +373,15 @@ form button { font-size: 12px; }
 .drivers-manager-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .drivers-manager-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .drivers-manager-actions > span { color: #899388; font-size: 9px; }
+.driver-autocomplete { position: relative; }
+.driver-suggestions { position: absolute; top: calc(100% + 3px); right: 0; left: 0; z-index: 20; max-height: 220px; overflow-y: auto; border: 1px solid #dfe7df; border-radius: 6px; background: #fff; box-shadow: 0 8px 20px #1c2b201f; }
+.driver-suggestions[hidden] { display: none; }
+.driver-suggestion { display: flex; width: 100%; min-height: 38px; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-bottom: 1px solid #edf0eb; color: #3c463c; background: #fff; text-align: left; cursor: pointer; }
+.driver-suggestion:last-child { border-bottom: 0; }
+.driver-suggestion:hover, .driver-suggestion:focus { outline: 0; background: #f0f7f1; }
+.driver-suggestion strong { font-size: 10px; }
+.driver-suggestion span, .driver-suggestions-empty { color: #788477; font-size: 9px; }
+.driver-suggestions-empty { padding: 10px; }
 .items-panel { padding-bottom: 14px; }
 .items-table-wrap { overflow-x: auto; }
 .items-table { width: 100%; min-width: 520px; }

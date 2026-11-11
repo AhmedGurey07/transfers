@@ -63,7 +63,7 @@ Product Catalog highlights products whose numeric **R/QUANTITY** is at or below 
 
 **Order filters** let users filter by branch, driver, product, status, and a date range. **Overdue** uses calendar days: Pending orders are flagged after 2 days and In progress orders after 1 day.
 
-**Stock reservations** shows the quantity reserved for Pending/In progress orders and the available catalog quantity. Set a product's optional **Reorder-to target** in the catalog to see a suggested quantity. **Approval requests** can be submitted while creating an order; staff stock adjustments are submitted as requests and do not change stock until an admin approves them. Workspace owners/admins review requests in **All orders**. Approved orders/adjustments update the catalog.
+**Stock reservations** shows the quantity reserved for Pending/In progress orders and the available catalog quantity. Set a product's optional **Reorder-to target** in the catalog to see a suggested quantity. Staff stock adjustments are submitted as requests and do not change stock until an admin approves them. Workspace owners/admins review requests in **All orders**. Approved orders/adjustments update the catalog.
 
 **Scheduled report summaries** can be set to daily or weekly in Reports. The summary is generated in-app while the website is open, or the next time someone opens it after the selected interval; it is not an email or a server-side background job.
 

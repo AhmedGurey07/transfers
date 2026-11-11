@@ -7,13 +7,13 @@
   <link rel="manifest" href="manifest.webmanifest?v=20261109">
   <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=202611120001">
+  <link rel="stylesheet" href="styles.css?v=202611130001">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
-  <script src="app.js?v=202611120004" defer></script>
+  <script src="app.js?v=202611130002" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -124,6 +124,7 @@
           <article class="stat-card"><div class="stat-top"><span class="stat-label">IN PROGRESS</span><span class="stat-icon icon-lilac">↗</span></div><div class="stat-number" id="stat-in-progress">0</div><div class="stat-foot"><span class="stat-foot-label">Being fulfilled</span></div></article>
           <article class="stat-card"><div class="stat-top"><span class="stat-label">DELIVERED</span><span class="stat-icon icon-green">✓</span></div><div class="stat-number" id="stat-delivered">0</div><div class="stat-foot"><span class="stat-foot-label">Completed orders</span></div></article>
           <article class="stat-card"><div class="stat-top"><span class="stat-label">CANCELLED</span><span class="stat-icon icon-amber">×</span></div><div class="stat-number" id="stat-cancelled">0</div><div class="stat-foot"><span class="stat-foot-label">Cancelled orders</span></div></article>
+          <article class="stat-card overdue-stat-card"><div class="stat-top"><span class="stat-label">OVERDUE</span><span class="stat-icon icon-amber">!</span></div><div class="stat-number" id="stat-overdue">0</div><div class="stat-foot"><span class="stat-foot-label">Pending 2+ days · In progress 1+ day</span></div></article>
           <article class="stat-card low-stock-stat-card"><div class="stat-top"><span class="stat-label">LOW STOCK</span><span class="stat-icon icon-amber">!</span></div><div class="stat-number" id="stat-low-stock">0</div><div class="stat-foot"><span class="stat-foot-label">Products at or below threshold</span></div></article>
         </div>
 
@@ -137,8 +138,13 @@
 
       <section class="view" id="orders-view" aria-labelledby="orders-title">
         <div class="page-heading"><div><p class="eyebrow">YOUR BUSINESS RECORDS</p><h1 id="orders-title">All orders</h1><p class="welcome-copy">Review, update, and print your saved orders.</p></div><button class="button button-primary" type="button" data-action="new-order"><span class="button-plus">＋</span> Create new order</button></div>
-        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search customer or order number" aria-label="Search orders"></label><label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="In progress">In progress</option><option value="Delivered">Delivered</option><option value="Cancelled">Cancelled</option></select></label><label class="filter-select filter-date"><span class="sr-only">Filter by order date</span><input id="order-date-filter" type="date" aria-label="Filter by order date"></label></div>
+        <div class="filter-bar order-filters"><label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search customer, product, driver, or order" aria-label="Search orders"></label><label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="In progress">In progress</option><option value="Delivered">Delivered</option><option value="Cancelled">Cancelled</option></select></label><label class="filter-select"><span class="sr-only">Filter by branch</span><input id="order-branch-filter" type="search" placeholder="Branch"></label><label class="filter-select"><span class="sr-only">Filter by driver</span><input id="order-driver-filter" type="search" placeholder="Driver"></label><label class="filter-select"><span class="sr-only">Order date from</span><input id="order-date-from-filter" type="date"></label><label class="filter-select"><span class="sr-only">Order date to</span><input id="order-date-to-filter" type="date"></label><label class="filter-select"><span class="sr-only">Assigned to me</span><span><input id="my-orders-filter" type="checkbox"> My orders</span></label></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th data-order-sort="id">ORDER</th><th data-order-sort="customer">CUSTOMER</th><th data-order-sort="transferId">TRANSFER ID</th><th data-order-sort="date">DATE</th><th data-order-sort="status">STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="all-orders"></tbody></table></div><div class="empty-state" id="orders-empty"><span class="empty-icon">⌕</span><strong>No matching orders</strong><span>Try changing your search or create a new order.</span></div></div>
+        <section class="panel approval-panel" id="approvals-panel">
+          <div class="panel-heading"><div><h2>Approval requests</h2><p>Staff requests for orders and stock adjustments. Only workspace admins can approve or reject.</p></div></div>
+          <div class="table-scroll"><table><thead><tr><th>TYPE</th><th>REQUEST</th><th>REQUESTED BY</th><th>WHEN</th><th>STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="approval-requests"></tbody></table></div>
+          <div class="empty-state" id="approvals-empty" hidden><strong>No approval requests</strong><span>Requests needing review will appear here.</span></div>
+        </section>
       </section>
 
       <section class="view" id="catalog-view" aria-labelledby="catalog-title">
@@ -163,6 +169,7 @@
             <label class="field"><span>UOM/N</span><input id="catalog-edit-uom-ns" placeholder="e.g. 73"></label>
             <label class="field"><span>UOM <i>*</i></span><select id="catalog-edit-unit" required></select></label>
             <label class="field"><span>STS</span><input id="catalog-edit-statuses" placeholder="e.g. Active"></label>
+            <label class="field"><span>Reorder-to target</span><input id="catalog-edit-reorder-target" type="number" min="0" step="any" placeholder="Optional target stock"></label>
           </div>
           <div class="form-actions"><span class="auth-status" id="catalog-edit-status" role="status" aria-live="polite"></span><div><button class="button button-quiet" type="button" id="catalog-edit-cancel">Cancel</button><button class="button button-primary" type="submit">Save product</button></div></div>
         </form>
@@ -171,7 +178,11 @@
           <div class="field-grid">
             <label class="field"><span>Amount <i>*</i></span><input id="catalog-adjust-amount" type="number" min="0.01" step="any" required></label>
             <label class="field"><span>Date <i>*</i></span><input id="catalog-adjust-date" type="date" required></label>
+            <label class="field" id="catalog-adjust-from-field"><span>From <i>*</i></span><select id="catalog-adjust-from" required></select></label>
+            <label class="field" id="catalog-adjust-other-from-field" hidden><span>Other source <i>*</i></span><input id="catalog-adjust-other-from" maxlength="120" placeholder="Enter source location"></label>
+            <label class="field" id="catalog-adjust-to-field"><span>To</span><input id="catalog-adjust-to" value="WH2/Warehouse 200k" readonly></label>
             <label class="field field-wide"><span>Reason <i>*</i></span><input id="catalog-adjust-reason" maxlength="200" required></label>
+            <label class="field field-wide approval-request-field"><span><input id="catalog-adjust-request-approval" type="checkbox"> Request admin approval instead of changing stock now</span></label>
           </div>
           <div class="form-actions"><span class="auth-status" id="catalog-adjust-status" role="status" aria-live="polite"></span><div><button class="button button-quiet" type="button" id="catalog-adjust-cancel">Cancel</button><button class="button button-primary" id="catalog-adjust-submit" type="submit">Save adjustment</button></div></div>
         </form>
@@ -236,6 +247,12 @@
           <article class="stat-card"><span class="stat-label">ORDERED QTY</span><strong id="report-ordered-quantity">0</strong></article>
           <article class="stat-card"><span class="stat-label">RETURNED CARTONS / FIRI</span><strong id="report-returned-quantity">0 / 0</strong></article>
         </div>
+        <form class="panel scheduled-report-settings" id="scheduled-report-form">
+          <div class="panel-heading"><div><h2>Scheduled report summaries</h2><p>Show a daily or weekly summary while the app is open, or when a workspace member next opens it after the interval.</p></div></div>
+          <label class="field"><span>Schedule</span><select id="scheduled-report-frequency"><option value="off">Off</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
+          <button class="button button-secondary" type="submit">Save schedule</button>
+          <p id="scheduled-report-status" class="auth-status" role="status" aria-live="polite"></p>
+        </form>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th>TYPE</th><th>DATE</th><th>REFERENCE</th><th>BRANCH</th><th>PRODUCT</th><th>QUANTITY</th><th>UNIT</th></tr></thead><tbody id="report-rows"></tbody></table></div><div class="empty-state" id="reports-empty"><span class="empty-icon">▥</span><strong>No report data</strong><span>Try changing the date, product, or branch filters.</span></div></div>
       </section>
 
@@ -342,8 +359,21 @@
                     <div class="drivers-manager-actions"><button class="button button-secondary" type="button" id="save-driver">Save driver</button><span id="drivers-status" role="status" aria-live="polite"></span></div>
                   </details>
                   <label class="field"><span>Created by</span><select name="preparedBy"><option value="Eng Ahmed Gurey">Eng Ahmed Gurey</option><option value="Hamze Ali">Hamze Ali</option></select></label>
+                  <label class="field"><span>Assigned staff member</span><select name="assignedUserId" id="order-assigned-user"><option value="">Unassigned</option></select></label>
+                  <label class="field"><span>Assigned driver</span><input name="assignedDriver" id="order-assigned-driver" list="saved-drivers" maxlength="80" placeholder="Choose a driver"></label>
+                  <label class="field field-wide approval-request-field"><span><input name="requestApproval" id="order-request-approval" type="checkbox"> Request admin approval for this order</span></label>
                   <label class="field field-wide"><span>Notes</span><textarea name="notes" rows="2" maxlength="250" placeholder="Add delivery instructions or other details"></textarea></label>
                 </div>
+              </article>
+              <article class="panel delivery-confirmation-panel" id="delivery-confirmation-panel" hidden>
+                <div class="panel-heading"><div><h2>Delivery confirmation</h2><p>Record the recipient and arrival details. A drawn signature is optional.</p></div></div>
+                <label class="field"><span><input id="delivery-mark-complete" type="checkbox"> Confirm this order as delivered</span></label>
+                <div class="field-grid">
+                  <label class="field"><span>Received by <i>*</i></span><input id="delivery-recipient" maxlength="120"></label>
+                  <label class="field"><span>Arrival date and time <i>*</i></span><input id="delivery-arrived-at" type="datetime-local"></label>
+                </div>
+                <label class="field signature-field"><span>Recipient signature (optional)</span><canvas id="delivery-signature" width="600" height="180" aria-label="Draw recipient signature"></canvas></label>
+                <button class="button button-quiet" id="clear-delivery-signature" type="button">Clear signature</button>
               </article>
 
               <article class="panel converter-panel" id="converter-panel" hidden>

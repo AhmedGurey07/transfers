@@ -77,6 +77,129 @@ grant select, insert, update, delete on public.returned_tile_records to authenti
 grant select, insert, update, delete on public.workspace_catalog to authenticated;
 grant select on public.workspace_user_roles to authenticated;
 
+create or replace function public.is_workspace_approval_admin()
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  caller_role text;
+begin
+  if auth.role() = 'service_role' then
+    return true;
+  end if;
+  select role into caller_role
+  from public.workspace_user_roles
+  where user_id = auth.uid();
+  return caller_role in ('owner', 'admin');
+end;
+$$;
+
+create or replace function public.enforce_workflow_approval_permissions()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  previous_request jsonb;
+  next_request jsonb;
+  previous_requests jsonb;
+  next_requests jsonb;
+begin
+  if public.is_workspace_approval_admin() then
+    return new;
+  end if;
+
+  if tg_table_name = 'orders' then
+    if tg_op = 'INSERT' then
+      if coalesce(new.data->>'approvalStatus', '') in ('approved', 'rejected') then
+        raise exception 'Only a workspace admin can decide order approvals.';
+      end if;
+      if new.data->>'approvalStatus' = 'pending'
+        and new.data->>'approvalRequestedById' is distinct from auth.uid()::text then
+        raise exception 'Staff can only submit their own order approval requests.';
+      end if;
+      return new;
+    end if;
+
+    if old.data->>'approvalStatus' = 'pending'
+      and (
+        old.data->>'approvalRequestedById' is distinct from new.data->>'approvalRequestedById'
+        or old.data->>'approvalRequestedAt' is distinct from new.data->>'approvalRequestedAt'
+      ) then
+      raise exception 'Staff cannot change the requester of a pending order approval.';
+    end if;
+    if old.data->>'approvalStatus' is distinct from new.data->>'approvalStatus' then
+      if old.data->>'approvalStatus' = 'pending'
+        or new.data->>'approvalStatus' in ('approved', 'rejected')
+        or old.data->>'approvalStatus' = 'approved' then
+        raise exception 'Only a workspace admin can decide order approvals.';
+      end if;
+      if new.data->>'approvalStatus' = 'pending'
+        and new.data->>'approvalRequestedById' is distinct from auth.uid()::text then
+        raise exception 'Staff can only submit their own order approval requests.';
+      end if;
+    end if;
+    return new;
+  end if;
+
+  next_requests := coalesce(new.data->'catalogApprovals', '[]'::jsonb);
+  if tg_op = 'INSERT' then
+    for next_request in select value from jsonb_array_elements(next_requests)
+    loop
+      if next_request->>'status' <> 'pending'
+        or next_request->>'requestedById' is distinct from auth.uid()::text then
+        raise exception 'Staff can only submit their own pending stock approval requests.';
+      end if;
+    end loop;
+    return new;
+  end if;
+
+  previous_requests := coalesce(old.data->'catalogApprovals', '[]'::jsonb);
+
+  for previous_request in select value from jsonb_array_elements(previous_requests)
+  loop
+    if not exists (
+      select 1
+      from jsonb_array_elements(next_requests) as candidate(value)
+      where candidate.value = previous_request
+    ) then
+      raise exception 'Only a workspace admin can change or remove stock approval requests.';
+    end if;
+  end loop;
+
+  for next_request in select value from jsonb_array_elements(next_requests)
+  loop
+    if not exists (
+      select 1
+      from jsonb_array_elements(previous_requests) as candidate(value)
+      where candidate.value = next_request
+    ) and (
+      next_request->>'status' <> 'pending'
+      or next_request->>'requestedById' is distinct from auth.uid()::text
+    ) then
+      raise exception 'Staff can only submit their own pending stock approval requests.';
+    end if;
+  end loop;
+  return new;
+end;
+$$;
+
+revoke all on function public.is_workspace_approval_admin() from public, anon, authenticated;
+revoke all on function public.enforce_workflow_approval_permissions() from public, anon, authenticated;
+
+drop trigger if exists orders_workflow_approval_permissions on public.orders;
+create trigger orders_workflow_approval_permissions
+  before insert or update on public.orders
+  for each row execute function public.enforce_workflow_approval_permissions();
+
+drop trigger if exists catalog_workflow_approval_permissions on public.workspace_catalog;
+create trigger catalog_workflow_approval_permissions
+  before insert or update on public.workspace_catalog
+  for each row execute function public.enforce_workflow_approval_permissions();
+
 drop policy if exists "Users can read their own workspace role" on public.workspace_user_roles;
 create policy "Users can read their own workspace role"
   on public.workspace_user_roles

@@ -90,6 +90,7 @@
   };
   let productCatalog = window.AHMED_GUREY_PRODUCTS;
   let lowStockThreshold = 10;
+  let scheduledReportFrequency = "off";
   if (!Array.isArray(productCatalog)) throw new Error("The warehouse product catalog did not load.");
   function cleanPdfText(value) {
     return String(value || "")
@@ -115,6 +116,7 @@
   let cloudRole = "staff";
   let currentPreparedBy = "Eng Ahmed Gurey";
   let workspaceUsers = [];
+  let assignableUsers = [];
   let cloudChannel = null;
   let cloudActivationPromise = null;
   let cloudRefreshTimer = null;
@@ -126,11 +128,13 @@
   let adjustingCatalogIndex = -1;
   let catalogAdjustments = [];
   let catalogEditHistory = [];
+  let catalogApprovals = [];
   let returnedTiles = [];
   let returnedTilesSetupError = "";
   let editingReturnedTileId = "";
   let viewHistory = [];
   let orderFormSnapshot = "";
+  let signatureHasInk = false;
   function indexProductCatalog() {
     productsByName.clear();
     productsByPdfName.clear();
@@ -172,7 +176,7 @@
       ["unit", "UOM"], ["statuses", "STS"]
     ];
     return productCatalog.filter((item) => {
-      const matchesSearch = `${item.product} ${(item.quantities || []).join(" ")} ${(item.qtyItems || []).join(" ")} ${(item.taken || []).join(" ")} ${(item.rQuantities || []).join(" ")} ${(item.uomNs || []).join(" ")} ${(item.statuses || []).join(" ")} ${item.unit}`
+      const matchesSearch = `${item.product} ${(item.quantities || []).join(" ")} ${(item.qtyItems || []).join(" ")} ${(item.taken || []).join(" ")} ${(item.rQuantities || []).join(" ")} ${(item.uomNs || []).join(" ")} ${(item.statuses || []).join(" ")} ${item.unit} ${item.reorderTarget || ""}`
         .toLocaleLowerCase().includes(query);
       if (!matchesSearch) return false;
       return filterFields.every(([field]) => {
@@ -224,6 +228,8 @@
     ];
     $("#catalog-headings").replaceChildren(
       ...filterFields.map(([, label]) => Object.assign(document.createElement("th"), { textContent: label })),
+      ...["RESERVED", "AVAILABLE", "REORDER TO"].map((label) =>
+        Object.assign(document.createElement("th"), { textContent: label })),
       Object.assign(document.createElement("th"), { innerHTML: '<span class="sr-only">Actions</span>' })
     );
     const filtered = getFilteredCatalogRows();
@@ -257,6 +263,16 @@
       taken.textContent = formatCatalogValues(item.taken);
       const rQuantity = document.createElement("td");
       rQuantity.textContent = formatCatalogValues(item.rQuantities);
+      const reserved = document.createElement("td");
+      reserved.textContent = formatCatalogNumber(String(reservedQuantityFor(item)));
+      const available = document.createElement("td");
+      available.textContent = formatCatalogNumber(String(availableStockAfterReservations(item)));
+      const reorderTarget = document.createElement("td");
+      const targetText = String(item.reorderTarget ?? "").trim();
+      const targetQuantity = targetText ? Number(targetText) : NaN;
+      reorderTarget.textContent = Number.isFinite(targetQuantity) && targetQuantity >= 0
+        ? `${formatCatalogNumber(String(targetQuantity))} · suggest ${formatCatalogNumber(String(Math.max(0, targetQuantity - availableStockAfterReservations(item))))}`
+        : "—";
       const uomN = document.createElement("td");
       uomN.textContent = formatCatalogValues(item.uomNs);
       const unit = document.createElement("td");
@@ -296,8 +312,9 @@
         $("#item-history-search").value = item.product;
         setView("item-history");
       });
-      actions.append(edit, add, history);
-      row.append(product, quantity, qtyItem, taken, rQuantity, uomN, unit, status, actions);
+      if (!cloudDeployment || ["owner", "admin"].includes(cloudRole)) actions.append(edit);
+      actions.append(add, history);
+      row.append(product, quantity, qtyItem, taken, rQuantity, uomN, unit, status, reserved, available, reorderTarget, actions);
       return row;
     }));
     labelTableRows(target);
@@ -326,6 +343,12 @@
       ["Q/ITEM", formatCatalogValues(item.qtyItems)],
       ["Taken", formatCatalogValues(item.taken)],
       ["R/QUANTITY", formatCatalogValues(item.rQuantities)],
+      ["Reserved", formatCatalogNumber(String(reservedQuantityFor(item)))],
+      ["Available after reservations", formatCatalogNumber(String(availableStockAfterReservations(item)))],
+      ["Reorder target / suggestion", String(item.reorderTarget ?? "").trim()
+        && Number.isFinite(Number(item.reorderTarget))
+        ? `${formatCatalogNumber(String(item.reorderTarget))} / ${formatCatalogNumber(String(Math.max(0, Number(item.reorderTarget) - availableStockAfterReservations(item))))}`
+        : "—"],
       ["UOM/N", formatCatalogValues(item.uomNs)],
       ["UOM", item.unit || "—"],
       ["STS", formatCatalogValues(item.statuses)]
@@ -549,6 +572,7 @@
     $("#catalog-edit-uom-ns").value = (item.uomNs || []).map(formatCatalogNumber).join(", ");
     renderCatalogUomOptions(item.unit);
     $("#catalog-edit-statuses").value = (item.statuses || []).join(", ");
+    $("#catalog-edit-reorder-target").value = item.reorderTarget ?? "";
     $("#catalog-edit-status").textContent = "";
     $("#catalog-edit-status").classList.remove("error");
     $("#catalog-edit-form").hidden = false;
@@ -566,6 +590,7 @@
     $("#catalog-edit-uom-ns").value = "";
     renderCatalogUomOptions();
     $("#catalog-edit-statuses").value = "";
+    $("#catalog-edit-reorder-target").value = "";
     $("#catalog-edit-status").textContent = "";
     $("#catalog-edit-status").classList.remove("error");
     $("#catalog-edit-form").hidden = false;
@@ -598,6 +623,11 @@
   async function saveCatalogEdit(event) {
     event.preventDefault();
     if (!$("#catalog-edit-form").reportValidity()) return;
+    if (cloudDeployment && cloudRole === "staff") {
+      $("#catalog-edit-status").textContent = "Staff must request admin approval for catalog stock changes.";
+      $("#catalog-edit-status").classList.add("error");
+      return;
+    }
     if (!cloudUser || !supabaseClient) {
       $("#catalog-edit-status").textContent = "Sign in to save catalog changes.";
       $("#catalog-edit-status").classList.add("error");
@@ -629,7 +659,8 @@
       taken: splitCatalogValues($("#catalog-edit-taken").value),
       rQuantities: splitCatalogValues($("#catalog-edit-r-quantities").value),
       uomNs: splitCatalogValues($("#catalog-edit-uom-ns").value),
-      statuses: splitCatalogValues($("#catalog-edit-statuses").value)
+      statuses: splitCatalogValues($("#catalog-edit-statuses").value),
+      reorderTarget: $("#catalog-edit-reorder-target").value.trim()
     };
     const historyValue = (value) => Array.isArray(value)
       ? value.map(formatCatalogNumber).join(", ")
@@ -642,7 +673,8 @@
       ["rQuantities", "R/QUANTITY"],
       ["uomNs", "UOM/N"],
       ["unit", "UOM"],
-      ["statuses", "STS"]
+      ["statuses", "STS"],
+      ["reorderTarget", "Reorder target"]
     ].flatMap(([field, label]) => {
       const before = historyValue(previous[field]);
       const after = historyValue(updatedProduct[field]);
@@ -687,11 +719,39 @@
     $("#catalog-adjust-form").dataset.direction = String(direction);
     $("#catalog-adjust-amount").value = "";
     $("#catalog-adjust-date").value = dateValue();
+    const sourceLocations = [...new Set([
+      "Partners/Vendors",
+      ...orders.map((order) => String(order.branch || "").trim()),
+      ...returnedTiles.map((entry) => String(entry.branch || "").trim()),
+      ...catalogAdjustments.map((entry) => String(entry.fromLocation || "").trim())
+    ].filter(Boolean))].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+    const fromSelect = $("#catalog-adjust-from");
+    fromSelect.replaceChildren(
+      ...sourceLocations.map((location) => new Option(location, location)),
+      new Option("Other location…", "__other__")
+    );
+    fromSelect.value = sourceLocations.includes("Partners/Vendors") ? "Partners/Vendors" : sourceLocations[0];
+    $("#catalog-adjust-other-from").value = "";
+    $("#catalog-adjust-other-from-field").hidden = true;
+    $("#catalog-adjust-other-from").required = false;
+    $("#catalog-adjust-from-field").hidden = direction < 0;
+    $("#catalog-adjust-to-field").hidden = direction < 0;
+    $("#catalog-adjust-from").required = direction > 0;
     $("#catalog-adjust-reason").value = "";
+    $("#catalog-adjust-request-approval").checked = cloudDeployment && cloudRole === "staff";
+    $("#catalog-adjust-request-approval").disabled = cloudDeployment && cloudRole === "staff";
+    $("#catalog-adjust-request-approval").closest(".field").hidden = !cloudDeployment || cloudRole !== "staff";
     $("#catalog-adjust-status").textContent = "";
     $("#catalog-adjust-status").classList.remove("error");
     $("#catalog-adjust-amount").focus();
     $("#catalog-adjust-form").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function selectedCatalogAdjustmentSource() {
+    const selected = $("#catalog-adjust-from").value;
+    return selected === "__other__"
+      ? $("#catalog-adjust-other-from").value.trim()
+      : selected;
   }
 
   function closeCatalogAdjustment() {
@@ -713,9 +773,46 @@
     const direction = Number($("#catalog-adjust-form").dataset.direction);
     const date = $("#catalog-adjust-date").value;
     const reason = $("#catalog-adjust-reason").value.trim();
+    const fromLocation = direction > 0 ? selectedCatalogAdjustmentSource() : "WH2/Warehouse 200k";
+    const toLocation = direction > 0 ? "WH2/Warehouse 200k" : "Manual adjustment";
     const quantity = Number(item.quantities?.[0]);
     if (!item || !Number.isFinite(amount) || amount <= 0 || !Number.isFinite(direction)
-      || !Number.isFinite(quantity) || !date || !reason) return;
+      || !Number.isFinite(quantity) || !date || !reason || !fromLocation) {
+      if (direction > 0 && !fromLocation) {
+        $("#catalog-adjust-status").textContent = "Choose or enter a source location.";
+        $("#catalog-adjust-status").classList.add("error");
+      }
+      return;
+    }
+    if (cloudRole === "staff") {
+      const request = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        timestamp: Date.now(),
+        product: item.product,
+        amount: amount * direction,
+        date,
+        fromLocation,
+        toLocation,
+        reason,
+        unit: item.unit || "—",
+        requestedBy: usernameForUser(cloudUser),
+        requestedById: cloudUser.id,
+        status: "pending"
+      };
+      catalogApprovals = [...catalogApprovals, request];
+      try {
+        await saveCatalogToCloud(currentCatalogData(), false);
+        renderApprovalRequests();
+        closeCatalogAdjustment();
+        showToast("Stock adjustment request sent to an admin; stock has not changed.");
+      } catch (error) {
+        catalogApprovals = catalogApprovals.filter((entry) => entry.id !== request.id);
+        console.error("Could not save stock adjustment request.", error);
+        $("#catalog-adjust-status").textContent = error.message || "Could not submit the request.";
+        $("#catalog-adjust-status").classList.add("error");
+      }
+      return;
+    }
     const previous = {
       ...item,
       quantities: [...(item.quantities || [])],
@@ -744,6 +841,8 @@
       actor: usernameForUser(cloudUser),
       actorEmail: String(cloudUser.email || "").trim(),
       reason,
+      fromLocation,
+      toLocation,
       unit: item.unit || "—"
     };
     catalogAdjustments = [...catalogAdjustments, adjustment];
@@ -1262,14 +1361,30 @@
 
   function applySyncedSourceData(data) {
     validateSyncedSourceData(data);
-    productCatalog = data.products;
+    const appCatalogByCode = new Map(productCatalog.flatMap((item) => {
+      const code = item.product.match(/^\s*\[([^\]]+)\]/)?.[1]?.toLocaleLowerCase();
+      return code ? [[code, item]] : [];
+    }));
+    const appCatalogByName = new Map(productCatalog.map((item) => [item.product.toLocaleLowerCase(), item]));
+    productCatalog = data.products.map((item) => {
+      const code = item.product.match(/^\s*\[([^\]]+)\]/)?.[1]?.toLocaleLowerCase();
+      const existing = (code && appCatalogByCode.get(code))
+        || appCatalogByName.get(item.product.toLocaleLowerCase());
+      return item.reorderTarget == null && existing
+        ? { ...item, reorderTarget: existing.reorderTarget || "" }
+        : item;
+    });
     if (data.lowStockThreshold != null
       && Number.isFinite(Number(data.lowStockThreshold)) && Number(data.lowStockThreshold) >= 0) {
       lowStockThreshold = Number(data.lowStockThreshold);
       $("#low-stock-threshold").value = String(lowStockThreshold);
     }
+    if (["off", "daily", "weekly"].includes(data.scheduledReportFrequency)) {
+      scheduledReportFrequency = data.scheduledReportFrequency;
+    }
     if (Array.isArray(data.adjustments)) catalogAdjustments = data.adjustments;
     if (Array.isArray(data.catalogEditHistory)) catalogEditHistory = data.catalogEditHistory;
+    if (Array.isArray(data.catalogApprovals)) catalogApprovals = data.catalogApprovals;
     window.AHMED_GUREY_PRODUCTS = productCatalog;
     indexProductCatalog();
     Object.keys(converters).forEach((key) => {
@@ -1303,13 +1418,16 @@
         rQuantities: Array.isArray(item.rQuantities) ? item.rQuantities.map(String) : [],
         uomNs: Array.isArray(item.uomNs) ? item.uomNs.map(String) : [],
         unit: String(item.unit || ""),
-        statuses: Array.isArray(item.statuses) ? item.statuses.map(String) : []
+        statuses: Array.isArray(item.statuses) ? item.statuses.map(String) : [],
+        reorderTarget: String(item.reorderTarget ?? "")
       })),
       converters,
       gypsumConverters,
       adjustments: catalogAdjustments,
       catalogEditHistory,
-      lowStockThreshold
+      catalogApprovals,
+      lowStockThreshold,
+      scheduledReportFrequency
     };
   }
 
@@ -1402,7 +1520,7 @@
   }
 
   function exportCatalogToExcel() {
-    const headers = ["PRODUCT / DESCRIPTION", "QUANTITY", "Q/ITEM", "TAKEN", "R/QUANTITY", "UOM/N", "UOM", "STS"];
+    const headers = ["PRODUCT / DESCRIPTION", "QUANTITY", "Q/ITEM", "TAKEN", "R/QUANTITY", "UOM/N", "UOM", "STS", "RESERVED", "AVAILABLE", "REORDER-TO"];
     const valueForExcel = (value) => escapeAttribute(Array.isArray(value) ? value.join(", ") : value ?? "");
     const rows = getFilteredCatalogRows().map((item) => [
       item.product,
@@ -1412,7 +1530,10 @@
       item.rQuantities,
       item.uomNs,
       item.unit,
-      item.statuses
+      item.statuses,
+      reservedQuantityFor(item),
+      availableStockAfterReservations(item),
+      item.reorderTarget
     ]);
     const table = `<table><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${
       rows.map((row) => `<tr>${row.map((value) => `<td>${valueForExcel(value)}</td>`).join("")}</tr>`).join("")
@@ -1829,6 +1950,50 @@
     return data;
   }
 
+  async function invokeWorkflowManagement(body) {
+    const { data, error } = await supabaseClient.functions.invoke("manage-workflows", { body });
+    if (error) {
+      let message = error.message || "Could not complete the workflow request.";
+      if (error.context instanceof Response) {
+        try {
+          const responseData = await error.context.clone().json();
+          if (typeof responseData.error === "string") message = responseData.error;
+        } catch (parseError) {
+          console.error("Could not read the workflow error response.", parseError);
+        }
+      }
+      throw new Error(message);
+    }
+    if (data?.error) throw new Error(data.error);
+    return data;
+  }
+
+  function renderAssignableUsers(selectedId = $("#order-assigned-user").value) {
+    const select = $("#order-assigned-user");
+    select.replaceChildren(new Option("Unassigned", ""));
+    assignableUsers.forEach((user) => {
+      const option = new Option(`${user.name || user.email || "Workspace user"} · ${user.role}`, user.id);
+      select.add(option);
+    });
+    select.value = assignableUsers.some((user) => user.id === selectedId) ? selectedId : "";
+  }
+
+  async function refreshAssignableUsers() {
+    if (!cloudDeployment || !cloudUser) {
+      assignableUsers = [];
+      renderAssignableUsers("");
+      return;
+    }
+    try {
+      const result = await invokeUserManagement({ action: "list-assignees" });
+      assignableUsers = result.users.filter((user) => user.active);
+      renderAssignableUsers();
+    } catch (error) {
+      console.error("Could not load assignment options.", error);
+      showToast(error.message || "Could not load workspace staff for assignments.");
+    }
+  }
+
   function formatUserDate(value) {
     if (!value) return "Never";
     const date = new Date(value);
@@ -2175,6 +2340,9 @@
     cloudRole = "staff";
     orders = [];
     drivers = [];
+    assignableUsers = [];
+    catalogApprovals = [];
+    scheduledReportFrequency = "off";
     showAuthGate("Sign in to load your shared online workspace.");
   }
 
@@ -2261,10 +2429,23 @@
           transferId: order.transferId || "",
           date: order.date || "",
           driver: order.driver || "",
+          assignedDriver: order.assignedDriver || "",
+          assignedUserId: order.assignedUserId || "",
+          assignedUserName: order.assignedUserName || "",
           driverPhone: order.driverPhone || "",
           preparedBy: order.preparedBy || "",
           notes: order.notes || "",
           status: normalizeOrderStatus(order.status),
+          approvalStatus: ["pending", "approved", "rejected"].includes(order.approvalStatus)
+            ? order.approvalStatus : "",
+          approvalRequestedBy: order.approvalRequestedBy || "",
+          approvalRequestedById: order.approvalRequestedById || "",
+          approvalRequestedAt: Number(order.approvalRequestedAt) || 0,
+          approvalDecidedBy: order.approvalDecidedBy || "",
+          approvalDecidedAt: Number(order.approvalDecidedAt) || 0,
+          receivedBy: order.receivedBy || "",
+          arrivedAt: order.arrivedAt || "",
+          deliverySignature: typeof order.deliverySignature === "string" ? order.deliverySignature : "",
           deletedAt: Number(order.deletedAt) || 0,
           catalogTakenApplied: Boolean(order.catalogTakenApplied),
           history,
@@ -2455,6 +2636,43 @@
   function dateValue(date = new Date()) {
     const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
     return localDate.toISOString().slice(0, 10);
+  }
+
+  function orderStatusStartDate(order) {
+    const statusChange = [...(order.history || [])].reverse()
+      .find((entry) => entry.action === "Status changed");
+    const timestamp = Number(statusChange?.timestamp) || Number(order.createdAt) || 0;
+    return dateValue(new Date(timestamp));
+  }
+
+  function isOrderOverdue(order) {
+    const now = new Date();
+    const status = normalizeOrderStatus(order.status);
+    const allowedDays = status === "Pending" ? 2 : status === "In progress" ? 1 : 0;
+    if (!allowedDays || order.deletedAt) return false;
+    const start = Date.parse(`${orderStatusStartDate(order)}T00:00:00Z`);
+    const today = Date.parse(`${dateValue(now)}T00:00:00Z`);
+    return Number.isFinite(start) && Math.floor((today - start) / 86400000) >= allowedDays;
+  }
+
+  function reservedQuantityFor(item, includeApplied = true) {
+    const productCode = item.product.match(/^\s*\[([^\]]+)\]/)?.[1]?.toLocaleLowerCase();
+    return orders.filter((order) => !order.deletedAt
+      && (includeApplied || !order.catalogTakenApplied)
+      && ["Pending", "In progress"].includes(normalizeOrderStatus(order.status)))
+      .reduce((total, order) => total + (order.items || []).reduce((subtotal, orderItem) => {
+        const orderCode = String(orderItem.product || "").match(/^\s*\[([^\]]+)\]/)?.[1]?.toLocaleLowerCase();
+        const sameProduct = productCode && orderCode
+          ? productCode === orderCode
+          : String(orderItem.product || "").toLocaleLowerCase() === item.product.toLocaleLowerCase();
+        return subtotal + (sameProduct ? Math.max(0, Number(orderItem.ordered) || 0) : 0);
+      }, 0), 0);
+  }
+
+  function availableStockAfterReservations(item) {
+    const remaining = remainingStockValues(item);
+    const currentRemaining = remaining.length ? Math.min(...remaining) : 0;
+    return Math.max(0, currentRemaining - reservedQuantityFor(item, false));
   }
 
   function formatDate(value) {
@@ -4261,8 +4479,77 @@
     }
   }
 
+  function clearDeliverySignature() {
+    const canvas = $("#delivery-signature");
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    signatureHasInk = false;
+  }
+
+  function readDeliverySignature() {
+    return signatureHasInk ? $("#delivery-signature").toDataURL("image/png") : "";
+  }
+
+  function drawSavedSignature(signature) {
+    clearDeliverySignature();
+    if (typeof signature !== "string" || !signature.startsWith("data:image/png;base64,")
+      || signature.length > 200000) return;
+    const image = new Image();
+    image.onload = () => {
+      const canvas = $("#delivery-signature");
+      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+      signatureHasInk = true;
+      if (editingId) orderFormSnapshot = currentOrderFormSnapshot();
+    };
+    image.onerror = () => {
+      console.error("Could not display the saved delivery signature.");
+      showToast("The saved delivery signature could not be displayed.");
+    };
+    image.src = signature;
+  }
+
+  function configureDeliverySignature() {
+    const canvas = $("#delivery-signature");
+    const context = canvas.getContext("2d");
+    context.lineWidth = 3;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    canvas.addEventListener("pointerdown", (event) => {
+      if ($("#delivery-confirmation-panel").hidden) return;
+      const bounds = canvas.getBoundingClientRect();
+      const x = (event.clientX - bounds.left) * canvas.width / bounds.width;
+      const y = (event.clientY - bounds.top) * canvas.height / bounds.height;
+      canvas.setPointerCapture(event.pointerId);
+      context.beginPath();
+      context.moveTo(x, y);
+      canvas.dataset.drawing = "true";
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (canvas.dataset.drawing !== "true") return;
+      const bounds = canvas.getBoundingClientRect();
+      const x = (event.clientX - bounds.left) * canvas.width / bounds.width;
+      const y = (event.clientY - bounds.top) * canvas.height / bounds.height;
+      context.lineTo(x, y);
+      context.stroke();
+      signatureHasInk = true;
+    });
+    const stopDrawing = () => { delete canvas.dataset.drawing; };
+    canvas.addEventListener("pointerup", stopDrawing);
+    canvas.addEventListener("pointercancel", stopDrawing);
+    $("#clear-delivery-signature").addEventListener("click", clearDeliverySignature);
+  }
+
+  function updateDeliveryConfirmationFields(showPanel = $("#delivery-mark-complete").checked) {
+    const confirmed = $("#delivery-mark-complete").checked;
+    $("#delivery-confirmation-panel").hidden = !showPanel;
+    $("#delivery-recipient").required = confirmed;
+    $("#delivery-arrived-at").required = confirmed;
+  }
+
   function readForm() {
     const data = new FormData(form);
+    const assignedUserId = data.get("assignedUserId");
+    const assignedUser = assignableUsers.find((user) => user.id === assignedUserId);
+    const previousOrder = orders.find((order) => order.id === editingId);
     return {
       id: editingId || nextOrderId(),
       customer: data.get("customer").trim(),
@@ -4271,14 +4558,37 @@
       transferId: data.get("transferId").trim(),
       date: data.get("date"),
       driver: data.get("driver").trim(),
+      assignedDriver: data.get("assignedDriver").trim(),
+      assignedUserId: String(assignedUserId || ""),
+      assignedUserName: assignedUser?.name || assignedUser?.email || previousOrder?.assignedUserName || "",
       driverPhone: data.get("driverPhone").trim(),
       preparedBy: data.get("preparedBy").trim(),
       notes: data.get("notes").trim(),
-      status: editingId
-        ? normalizeOrderStatus(orders.find((order) => order.id === editingId)?.status)
-        : "Pending",
+      status: $("#delivery-mark-complete").checked
+        ? "Delivered"
+        : editingId ? normalizeOrderStatus(previousOrder?.status) : "Pending",
+      approvalStatus: $("#order-request-approval").checked && previousOrder?.approvalStatus !== "approved"
+        ? "pending" : previousOrder?.approvalStatus || "",
+      approvalRequestedBy: $("#order-request-approval").checked && previousOrder?.approvalStatus !== "approved"
+        ? previousOrder?.approvalStatus === "pending"
+          ? previousOrder.approvalRequestedBy || usernameForUser(cloudUser)
+          : usernameForUser(cloudUser)
+        : previousOrder?.approvalRequestedBy || "",
+      approvalRequestedById: $("#order-request-approval").checked && previousOrder?.approvalStatus !== "approved"
+        ? previousOrder?.approvalStatus === "pending"
+          ? previousOrder.approvalRequestedById || cloudUser?.id || ""
+          : cloudUser?.id || ""
+        : previousOrder?.approvalRequestedById || "",
+      approvalRequestedAt: $("#order-request-approval").checked && previousOrder?.approvalStatus !== "approved"
+        ? previousOrder?.approvalStatus === "pending"
+          ? previousOrder.approvalRequestedAt || Date.now()
+          : Date.now()
+        : previousOrder?.approvalRequestedAt || 0,
+      receivedBy: $("#delivery-recipient").value.trim(),
+      arrivedAt: $("#delivery-arrived-at").value,
+      deliverySignature: readDeliverySignature(),
       items: getItems(),
-      createdAt: editingId ? orders.find((order) => order.id === editingId)?.createdAt || Date.now() : Date.now()
+      createdAt: editingId ? previousOrder?.createdAt || Date.now() : Date.now()
     };
   }
 
@@ -4291,9 +4601,16 @@
       transferId: data.get("transferId"),
       date: data.get("date"),
       driver: data.get("driver"),
+      assignedDriver: data.get("assignedDriver"),
+      assignedUserId: data.get("assignedUserId"),
       driverPhone: data.get("driverPhone"),
       preparedBy: data.get("preparedBy"),
       notes: data.get("notes"),
+      requestApproval: $("#order-request-approval").checked,
+      deliveryComplete: $("#delivery-mark-complete").checked,
+      receivedBy: $("#delivery-recipient").value,
+      arrivedAt: $("#delivery-arrived-at").value,
+      deliverySignature: readDeliverySignature(),
       items: getItems()
     });
   }
@@ -4320,16 +4637,18 @@
 
   function orderRow(order) {
     const status = normalizeOrderStatus(order.status);
+    const overdue = isOrderOverdue(order);
     const row = document.createElement("tr");
     row.className = "clickable-order-row";
+    if (overdue) row.classList.add("order-overdue-row");
     row.tabIndex = 0;
     row.setAttribute("aria-label", `Open order ${order.id}`);
     row.innerHTML = `
       <td><span class="order-number">${escapeAttribute(order.id)}</span></td>
-      <td class="customer-cell">${escapeAttribute(order.customer)}</td>
+      <td class="customer-cell">${escapeAttribute(order.customer)}${order.assignedUserName || order.assignedDriver ? `<small class="order-assignment">${escapeAttribute([order.assignedUserName, order.assignedDriver].filter(Boolean).join(" · "))}</small>` : ""}${overdue ? '<small class="overdue-label">OVERDUE</small>' : ""}</td>
       <td>${escapeAttribute(order.transferId || "—")}</td>
       <td>${formatDate(order.date)}</td>
-      <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button></td>
+      <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button>${order.approvalStatus === "pending" ? '<small class="approval-state">Awaiting approval</small>' : ""}</td>
       <td class="row-actions"><button class="icon-button" type="button" aria-label="Open order ${escapeAttribute(order.id)}" title="Open order">↗</button><button class="order-action-button" type="button" data-action="history" aria-label="View history for ${escapeAttribute(order.id)}">History</button><button class="order-action-button order-delete-button" type="button" data-action="delete" aria-label="Delete order ${escapeAttribute(order.id)}">Delete</button></td>`;
     row.addEventListener("click", (event) => {
       if (event.target.closest("button, a, input, select, textarea")) return;
@@ -4388,6 +4707,7 @@
     $("#stat-in-progress").textContent = String(activeOrders.filter((order) => normalizeOrderStatus(order.status) === "In progress").length);
     $("#stat-delivered").textContent = String(activeOrders.filter((order) => normalizeOrderStatus(order.status) === "Delivered").length);
     $("#stat-cancelled").textContent = String(activeOrders.filter((order) => normalizeOrderStatus(order.status) === "Cancelled").length);
+    $("#stat-overdue").textContent = String(activeOrders.filter(isOrderOverdue).length);
     $("#stat-low-stock").textContent = String(productCatalog.filter((item) => {
       const stock = remainingStockValues(item);
       return stock.length > 0 && Math.min(...stock) <= lowStockThreshold;
@@ -4397,23 +4717,105 @@
     target.replaceChildren(...sorted.slice(0, 5).map(orderRow));
     labelTableRows(target);
     $("#recent-empty").hidden = sorted.length > 0;
+    renderApprovalRequests();
     renderNotifications();
+  }
+
+  function renderApprovalRequests() {
+    const target = $("#approval-requests");
+    if (!target) return;
+    const requests = [
+      ...orders.filter((order) => !order.deletedAt && order.approvalStatus === "pending")
+        .map((order) => ({
+          type: "Order",
+          id: order.id,
+          summary: `${order.id} · ${order.customer}`,
+          requester: order.approvalRequestedBy || "Unknown user",
+          timestamp: Number(order.approvalRequestedAt) || Number(order.createdAt) || 0
+        })),
+      ...catalogApprovals.filter((request) => request.status === "pending")
+        .map((request) => ({
+          type: "Stock adjustment",
+          id: request.id,
+          summary: `${request.product} · ${formatCatalogNumber(request.amount)} ${request.unit || ""} · ${request.reason}`,
+          requester: request.requestedBy || "Unknown user",
+          timestamp: Number(request.timestamp) || 0
+        }))
+    ].sort((left, right) => right.timestamp - left.timestamp);
+    target.replaceChildren(...requests.map((request) => {
+      const row = document.createElement("tr");
+      [request.type, request.summary, request.requester,
+        request.timestamp ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(request.timestamp) : "—",
+        "Pending"].forEach((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      });
+      const actions = document.createElement("td");
+      if (["owner", "admin"].includes(cloudRole)) {
+        ["approve", "reject"].forEach((decision) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "order-action-button";
+          button.textContent = decision === "approve" ? "Approve" : "Reject";
+          button.addEventListener("click", () => decideApproval(request, decision));
+          actions.append(button);
+        });
+      } else {
+        actions.textContent = "Admin review required";
+      }
+      row.append(actions);
+      return row;
+    }));
+    labelTableRows(target);
+    $("#approvals-empty").hidden = requests.length > 0;
+  }
+
+  async function decideApproval(request, decision) {
+    if (!["owner", "admin"].includes(cloudRole)) {
+      showToast("Only workspace admins can decide approval requests.");
+      return;
+    }
+    try {
+      const body = request.type === "Order"
+        ? { action: "decide-order", orderId: request.id, decision }
+        : { action: "decide-adjustment", requestId: request.id, decision };
+      await invokeWorkflowManagement(body);
+      await loadCloudData(false);
+      renderProductCatalogOptions();
+      renderApprovalRequests();
+      renderAllOrders();
+      renderOverview();
+      showToast(`${request.type} request ${decision === "approve" ? "approved" : "rejected"}.`);
+    } catch (error) {
+      console.error("Could not decide approval request.", error);
+      showToast(error.message || "Could not update the approval request.");
+    }
   }
 
   function renderAllOrders() {
     const query = $("#order-search").value.trim().toLowerCase();
     const status = $("#status-filter").value;
-    const date = $("#order-date-filter").value;
+    const branch = $("#order-branch-filter").value.trim().toLocaleLowerCase();
+    const driver = $("#order-driver-filter").value.trim().toLocaleLowerCase();
+    const from = $("#order-date-from-filter").value;
+    const to = $("#order-date-to-filter").value;
+    const myOrders = $("#my-orders-filter").checked;
     const filtered = sortOrders(orders.filter((order) => !order.deletedAt)).filter((order) =>
       (status === "all" || normalizeOrderStatus(order.status) === status) &&
-      (!date || order.date === date) &&
-      `${order.id} ${order.customer} ${order.transferId || ""} ${order.category}`.toLowerCase().includes(query)
+      (!from || (order.date || "") >= from) &&
+      (!to || (order.date || "") <= to) &&
+      (!branch || String(order.branch || "").toLocaleLowerCase().includes(branch)) &&
+      (!driver || `${order.driver || ""} ${order.assignedDriver || ""}`.toLocaleLowerCase().includes(driver)) &&
+      (!myOrders || order.assignedUserId === cloudUser?.id) &&
+      `${order.id} ${order.customer} ${order.transferId || ""} ${order.category} ${order.branch || ""} ${order.driver || ""} ${order.assignedDriver || ""} ${(order.items || []).map((item) => item.product).join(" ")}`.toLocaleLowerCase().includes(query)
     );
     const target = $("#all-orders");
     target.replaceChildren(...filtered.map(orderRow));
     labelTableRows(target);
     $("#orders-empty").hidden = filtered.length > 0;
     updateOrderSortHeaders();
+    renderApprovalRequests();
   }
 
   function showOrderHistory(id) {
@@ -4488,18 +4890,20 @@
   }
 
   function getNotificationEvents() {
-    return orders.filter((order) => !order.deletedAt).flatMap((order) =>
+    const orderEvents = orders.filter((order) => !order.deletedAt).flatMap((order) =>
       (order.history || []).flatMap((entry) => {
         if (entry.action === "Order created" && order.driver) {
           return [{ ...entry, orderId: order.id, customer: order.customer, message: `Order assigned to ${order.driver}` }];
         }
         if (entry.action === "Order updated") {
-          const assigned = /Changed:.*(?:Delivered by|Driver phone)/i.test(entry.details || "");
+          const assigned = /Changed:.*(?:Delivered by|Assigned driver|Assigned staff member|Driver phone)/i.test(entry.details || "");
           return [{
             ...entry,
             orderId: order.id,
             customer: order.customer,
-            message: assigned ? `Order assigned to ${order.driver || "a driver"}` : "Order updated"
+            message: assigned
+              ? `Order assigned to ${[order.assignedUserName, order.assignedDriver || order.driver].filter(Boolean).join(" and ") || "a staff member"}`
+              : "Order updated"
           }];
         }
         if (entry.action === "Status changed") {
@@ -4511,9 +4915,38 @@
             message: nextStatus === "In progress" ? "Ready for delivery" : `Order status changed to ${nextStatus || "updated"}`
           }];
         }
+        if (entry.action === "Approval requested") {
+          return [{
+            ...entry,
+            orderId: order.id,
+            customer: order.customer,
+            message: "Order approval requested"
+          }];
+        }
         return [];
       })
-    ).sort((left, right) => Number(right.timestamp) - Number(left.timestamp));
+    );
+    const overdueEvents = orders.filter(isOrderOverdue).map((order) => {
+      const status = normalizeOrderStatus(order.status);
+      const ageDays = status === "Pending" ? 2 : 1;
+      const timestamp = Date.parse(`${orderStatusStartDate(order)}T00:00:00`) + ageDays * 86400000;
+      return {
+        timestamp,
+        orderId: order.id,
+        customer: order.customer,
+        actor: "Order Desk",
+        message: `${status} order overdue`
+      };
+    });
+    let scheduledEvents = [];
+    try {
+      scheduledEvents = JSON.parse(localStorage.getItem(scheduledReportKey("events")) || "[]");
+      if (!Array.isArray(scheduledEvents)) throw new Error("Scheduled report history is not a list.");
+    } catch (error) {
+      console.error("Could not read scheduled report notifications.", error);
+    }
+    return [...orderEvents, ...overdueEvents, ...scheduledEvents]
+      .sort((left, right) => Number(right.timestamp) - Number(left.timestamp));
   }
 
   function notificationStorageKey() {
@@ -4630,6 +5063,70 @@
     });
     $("#report-rows").replaceChildren(...tableRows);
     $("#reports-empty").hidden = reportRows.length > 0;
+  }
+
+  function scheduledReportKey(kind) {
+    return `shaafici-order-desk-scheduled-report-${kind}-${cloudUser?.id || "local"}`;
+  }
+
+  async function saveScheduledReport(event) {
+    event.preventDefault();
+    const frequency = $("#scheduled-report-frequency").value;
+    if (!["off", "daily", "weekly"].includes(frequency)) {
+      $("#scheduled-report-status").textContent = "Choose a valid report schedule.";
+      $("#scheduled-report-status").classList.add("error");
+      return;
+    }
+    const previousFrequency = scheduledReportFrequency;
+    scheduledReportFrequency = frequency;
+    try {
+      if (cloudDeployment) await saveCatalogToCloud(currentCatalogData(), false);
+      else localStorage.setItem("shaafici-order-desk-scheduled-report-frequency", frequency);
+      localStorage.setItem(scheduledReportKey("last"), String(Date.now()));
+      $("#scheduled-report-status").textContent = frequency === "off"
+        ? "Scheduled summaries turned off."
+        : `A ${frequency} summary will appear the next time this app is open after the interval.`;
+      $("#scheduled-report-status").classList.remove("error");
+    } catch (error) {
+      scheduledReportFrequency = previousFrequency;
+      $("#scheduled-report-frequency").value = previousFrequency;
+      console.error("Could not save the scheduled report setting.", error);
+      $("#scheduled-report-status").textContent = error.message || "Could not save the report schedule.";
+      $("#scheduled-report-status").classList.add("error");
+    }
+  }
+
+  function runScheduledReports() {
+    const frequency = scheduledReportFrequency;
+    if (frequency === "off") return;
+    const interval = frequency === "daily" ? 86400000 : 7 * 86400000;
+    const now = Date.now();
+    const last = Number(localStorage.getItem(scheduledReportKey("last")));
+    if (!Number.isFinite(last) || last <= 0) {
+      localStorage.setItem(scheduledReportKey("last"), String(now));
+      return;
+    }
+    if (now - last < interval) return;
+    const active = orders.filter((order) => !order.deletedAt);
+    const pending = active.filter((order) => normalizeOrderStatus(order.status) === "Pending").length;
+    const overdue = active.filter(isOrderOverdue).length;
+    const lowStock = productCatalog.filter((item) => {
+      const stock = remainingStockValues(item);
+      return stock.length > 0 && Math.min(...stock) <= lowStockThreshold;
+    }).length;
+    const event = {
+      timestamp: now,
+      message: `${frequency === "daily" ? "Daily" : "Weekly"} report: ${active.length} orders, ${pending} pending, ${overdue} overdue, ${lowStock} low-stock products.`,
+      orderId: "Scheduled report",
+      customer: "Workspace summary",
+      actor: "Order Desk"
+    };
+    const key = scheduledReportKey("events");
+    const priorEvents = JSON.parse(localStorage.getItem(key) || "[]");
+    localStorage.setItem(key, JSON.stringify([event, ...priorEvents].slice(0, 50)));
+    localStorage.setItem(scheduledReportKey("last"), String(now));
+    renderNotifications();
+    showToast(event.message);
   }
 
   function exportReportCsv() {
@@ -4781,12 +5278,12 @@
         ...entry,
         timestamp: entry.timestamp,
         reference: entry.reference || (entry.amount > 0 ? "Direct quantity addition" : "Direct quantity reduction"),
-        from: entry.previousQuantity == null
-          ? entry.amount > 0 ? "Manual adjustment" : "WH2/Warehouse 200k"
-          : formatCatalogNumber(entry.previousQuantity),
-        to: entry.updatedQuantity == null
-          ? entry.amount > 0 ? "WH2/Warehouse 200k" : "Manual adjustment"
-          : formatCatalogNumber(entry.updatedQuantity),
+        from: entry.amount > 0
+          ? entry.fromLocation || "Partners/Vendors"
+          : entry.fromLocation || "WH2/Warehouse 200k",
+        to: entry.amount > 0
+          ? "WH2/Warehouse 200k"
+          : entry.toLocation || "Manual adjustment",
         quantity: Math.abs(entry.amount),
         warehouseTransfer: false,
         quantityHighlight: true,
@@ -4983,6 +5480,13 @@
   function resetForm() {
     form.reset();
     editingId = null;
+    renderAssignableUsers("");
+    $("#order-request-approval").disabled = false;
+    $("#delivery-mark-complete").checked = false;
+    updateDeliveryConfirmationFields(false);
+    $("#delivery-recipient").value = "";
+    $("#delivery-arrived-at").value = "";
+    clearDeliverySignature();
     converterPinnedOpen = false;
     form.elements.preparedBy.value = currentPreparedBy;
     $("#order-date").value = dateValue();
@@ -5037,9 +5541,18 @@
     form.elements.transferId.value = order.transferId || "";
     form.elements.date.value = order.date;
     form.elements.driver.value = order.driver || "";
+    form.elements.assignedDriver.value = order.assignedDriver || "";
+    renderAssignableUsers(order.assignedUserId || "");
+    $("#order-request-approval").checked = order.approvalStatus === "pending";
+    $("#order-request-approval").disabled = order.approvalStatus === "approved";
     form.elements.driverPhone.value = order.driverPhone || "";
     form.elements.preparedBy.value = normalizeCreatedBy(order.preparedBy);
     form.elements.notes.value = order.notes || "";
+    $("#delivery-recipient").value = order.receivedBy || "";
+    $("#delivery-arrived-at").value = order.arrivedAt || "";
+    drawSavedSignature(order.deliverySignature || "");
+    $("#delivery-mark-complete").checked = normalizeOrderStatus(order.status) === "Delivered";
+    updateDeliveryConfirmationFields($("#delivery-mark-complete").checked);
     itemsBody.replaceChildren();
     (order.items.length ? order.items : [{}]).forEach(createItemRow);
     updateConverterVisibility();
@@ -5070,10 +5583,17 @@
       ["Category", "category"],
       ["Transfer ID", "transferId"],
       ["Order date", "date"],
+      ["Status", "status"],
       ["Delivered by", "driver"],
+      ["Assigned driver", "assignedDriver"],
+      ["Assigned staff member", "assignedUserName"],
       ["Driver phone", "driverPhone"],
       ["Created by", "preparedBy"],
       ["Notes", "notes"],
+      ["Approval request", "approvalStatus"],
+      ["Delivery recipient", "receivedBy"],
+      ["Arrival time", "arrivedAt"],
+      ["Delivery signature", "deliverySignature"],
       ["Items", "items"]
     ];
     return fields.filter(([, key]) => JSON.stringify(previous[key] ?? "") !== JSON.stringify(next[key] ?? ""))
@@ -5115,7 +5635,9 @@
     if (previousOrder?.catalogTakenApplied) {
       catalogChanges = applyOrderCatalogDelta(previousOrder, -1);
     }
-    const orderCatalogChanges = applyOrderCatalogDelta(order, 1);
+    const pendingApproval = order.approvalStatus === "pending";
+    const orderCatalogChanges = pendingApproval || order.status === "Cancelled"
+      ? [] : applyOrderCatalogDelta(order, 1);
     catalogChanges = [...catalogChanges, ...orderCatalogChanges];
     const catalogChanged = catalogChanges.length > 0;
     if (catalogChanged && cloudDeployment) {
@@ -5129,7 +5651,7 @@
         return;
       }
     }
-    order.catalogTakenApplied = true;
+    order.catalogTakenApplied = !pendingApproval && order.status !== "Cancelled";
     order.history = previousOrder ? [...previousOrder.history] : [];
     if (catalogChanged) {
       const historyChanges = new Map();
@@ -5144,7 +5666,13 @@
     if (previousOrder) {
       const changedFields = changedOrderFields(previousOrder, order);
       if (changedFields.length) recordOrderHistory(order, "Order updated", `Changed: ${changedFields.join(", ")}.`);
+      if (previousOrder.status !== order.status) {
+        recordOrderHistory(order, "Status changed", `${previousOrder.status} → ${order.status}.`);
+      }
     } else recordOrderHistory(order, "Order created", "Order saved.");
+    if (pendingApproval && previousOrder?.approvalStatus !== "pending") {
+      recordOrderHistory(order, "Approval requested", "Order submitted for admin approval.");
+    }
     orders = [...orders];
     if (index >= 0) orders[index] = order;
     else orders.push(order);
@@ -5167,7 +5695,10 @@
     }
     orderFormSnapshot = currentOrderFormSnapshot();
     renderOverview();
-    showToast(index >= 0 ? "Order updated successfully." : "Order saved successfully.");
+    renderApprovalRequests();
+    showToast(pendingApproval
+      ? "Order submitted for admin approval; stock has not changed."
+      : index >= 0 ? "Order updated successfully." : "Order saved successfully.");
     editingId = order.id;
     refreshPreview();
     openPrintPreview(order, "overview");
@@ -5176,19 +5707,73 @@
   async function changeStatus(id) {
     const order = orders.find((entry) => entry.id === id);
     if (!order || order.deletedAt) return;
+    if (order.approvalStatus === "pending") {
+      showToast("This order is waiting for admin approval before its status can change.");
+      return;
+    }
     const statuses = ["Pending", "In progress", "Delivered", "Cancelled"];
     const previousStatus = normalizeOrderStatus(order.status);
     const nextStatus = statuses[(statuses.indexOf(previousStatus) + 1) % statuses.length];
-    const updatedOrder = { ...order, status: nextStatus, history: [...order.history] };
+    if (nextStatus === "Delivered") {
+      editOrder(id);
+      $("#delivery-confirmation-panel").hidden = false;
+      showToast("Enter the recipient and arrival time, then confirm delivery and save.");
+      return;
+    }
+    const previousCatalog = productCatalog.map((item) => ({
+      ...item,
+      quantities: [...(item.quantities || [])],
+      qtyItems: [...(item.qtyItems || [])],
+      taken: [...(item.taken || [])],
+      rQuantities: [...(item.rQuantities || [])],
+      uomNs: [...(item.uomNs || [])],
+      statuses: [...(item.statuses || [])]
+    }));
+    let catalogChanges = [];
+    let catalogTakenApplied = Boolean(order.catalogTakenApplied);
+    if (nextStatus === "Cancelled" && catalogTakenApplied) {
+      catalogChanges = applyOrderCatalogDelta(order, -1);
+      catalogTakenApplied = false;
+    } else if (previousStatus === "Cancelled" && nextStatus === "Pending"
+      && !catalogTakenApplied && order.approvalStatus !== "pending") {
+      catalogChanges = applyOrderCatalogDelta(order, 1);
+      catalogTakenApplied = true;
+    }
+    if (catalogChanges.length && cloudDeployment) {
+      try {
+        await saveCatalogToCloud(currentCatalogData());
+      } catch (error) {
+        productCatalog = previousCatalog;
+        indexProductCatalog();
+        console.error("Could not update stock for the order status change.", error);
+        showToast(error.message || "Could not update stock for this order status change.");
+        return;
+      }
+    }
+    const updatedOrder = { ...order, status: nextStatus, catalogTakenApplied, history: [...order.history] };
     recordOrderHistory(updatedOrder, "Status changed", `${previousStatus} → ${nextStatus}.`);
+    if (catalogChanges.length) {
+      recordOrderHistory(updatedOrder, "Catalog quantities updated",
+        `Stock released or reserved for ${updatedOrder.id}.`, { catalogChanges });
+    }
     const index = orders.indexOf(order);
     const previousOrders = orders;
     orders = [...orders];
     orders[index] = updatedOrder;
     if (!await persistOrders(updatedOrder)) {
       orders = previousOrders;
+      if (catalogChanges.length) {
+        productCatalog = previousCatalog;
+        indexProductCatalog();
+        try {
+          await saveCatalogToCloud(currentCatalogData());
+        } catch (error) {
+          console.error("Could not restore stock after the order status save failed.", error);
+        }
+      }
       return;
     }
+    if (catalogChanges.length) renderProductCatalogOptions();
     renderOverview();
     renderAllOrders();
     showToast(`${updatedOrder.id} marked ${updatedOrder.status.toLowerCase()}.`);
@@ -5511,6 +6096,12 @@
   $("#catalog-edit-cancel").addEventListener("click", closeCatalogEdit);
   $("#catalog-adjust-form").addEventListener("submit", saveCatalogAdjustment);
   $("#catalog-adjust-cancel").addEventListener("click", closeCatalogAdjustment);
+  $("#catalog-adjust-from").addEventListener("change", () => {
+    const isOther = $("#catalog-adjust-from").value === "__other__";
+    $("#catalog-adjust-other-from-field").hidden = !isOther;
+    $("#catalog-adjust-other-from").required = isOther;
+    if (isOther) $("#catalog-adjust-other-from").focus();
+  });
   $("#returned-tile-form").addEventListener("submit", saveReturnedTile);
   $("#cancel-returned-tile-edit").addEventListener("click", closeReturnedTileEdit);
   $("#returned-tiles-search").addEventListener("input", renderReturnedTiles);
@@ -5527,11 +6118,15 @@
   ["quantities", "taken", "qty-items"].forEach((field) => {
     $(`#catalog-edit-${field}`).addEventListener("input", updateCatalogDerivedFields);
   });
-  $("#order-search").addEventListener("input", renderAllOrders);
-  $("#status-filter").addEventListener("change", renderAllOrders);
-  $("#order-date-filter").addEventListener("change", renderAllOrders);
+  ["order-search", "order-branch-filter", "order-driver-filter", "order-date-from-filter", "order-date-to-filter"]
+    .forEach((id) => $(`#${id}`).addEventListener("input", renderAllOrders));
+  ["status-filter", "order-date-from-filter", "order-date-to-filter", "my-orders-filter"]
+    .forEach((id) => $(`#${id}`).addEventListener("change", renderAllOrders));
   $("#catalog-search").addEventListener("input", renderProductCatalogTable);
   $("#low-stock-form").addEventListener("submit", saveLowStockThreshold);
+  $("#scheduled-report-form").addEventListener("submit", saveScheduledReport);
+  $("#delivery-mark-complete").addEventListener("change", () => updateDeliveryConfirmationFields());
+  configureDeliverySignature();
   $("#catalog-filter-apply").addEventListener("click", applyCatalogFilterPanel);
   $("#catalog-filter-cancel").addEventListener("click", cancelCatalogFilterPanel);
   $$("[data-catalog-filter-operator]").forEach((operator) => {
@@ -5552,6 +6147,8 @@
     fitProductDescriptions($("#preview-items"));
     fitProductDescriptions($("#paper-items"));
   });
+  window.setInterval(runScheduledReports, 60000);
+  window.addEventListener("focus", runScheduledReports);
   window.addEventListener("beforeunload", (event) => {
     if (!hasUnsavedOrderChanges()) return;
     event.preventDefault();
@@ -5563,6 +6160,12 @@
     $("#auth-gate").hidden = true;
     $("#sign-out").hidden = !cloudDeployment;
     $("#users-nav-link").hidden = !cloudDeployment || !["owner", "admin"].includes(cloudRole);
+    $("#add-catalog-product").hidden = cloudDeployment && cloudRole === "staff";
+    $("#upload-workbook").hidden = cloudDeployment && cloudRole === "staff";
+    $("#order-request-approval").closest(".field").hidden = !cloudDeployment;
+    $("#approvals-panel").hidden = !cloudDeployment;
+    $("#order-assigned-user").closest(".field").hidden = !cloudDeployment;
+    $("#my-orders-filter").closest("label").hidden = !cloudDeployment;
     $("#account-avatar").hidden = !cloudDeployment;
     renderAccountAvatar(cloudUser);
     $("#welcome-greeting").textContent = greetingForTime();
@@ -5579,6 +6182,11 @@
       year: "numeric"
     }).format(new Date());
     renderProductCatalogOptions();
+    refreshAssignableUsers();
+    if (!cloudDeployment) {
+      scheduledReportFrequency = localStorage.getItem("shaafici-order-desk-scheduled-report-frequency") || "off";
+    }
+    $("#scheduled-report-frequency").value = scheduledReportFrequency;
     renderSavedDrivers();
     $("#order-date").value = dateValue();
     $("#return-date").value = dateValue();
@@ -5596,6 +6204,7 @@
     updateConverter();
     if (needsMoneyDataCleanup && !cloudDeployment) persistOrders();
     renderOverview();
+    runScheduledReports();
     refreshPreview();
     if (!cloudDeployment && (location.protocol === "file:"
       || location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname))) {

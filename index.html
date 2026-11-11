@@ -7,13 +7,13 @@
   <link rel="manifest" href="manifest.webmanifest?v=20261109">
   <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=202611110825">
+  <link rel="stylesheet" href="styles.css?v=202611120001">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
-  <script src="app.js?v=202611110818" defer></script>
+  <script src="app.js?v=202611120001" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -29,7 +29,7 @@
         <input id="auth-password" type="password" autocomplete="current-password" required>
       </label>
       <button class="button button-primary auth-submit" id="auth-submit" type="submit">Sign in</button>
-      <p class="auth-copy auth-signup-note">Accounts are invite-only. Ask a workspace admin to invite you, then follow the email link to sign up.</p>
+      <p class="auth-copy auth-signup-note">Accounts are created by workspace admins. Ask an admin to create your account and securely share your initial password.</p>
       <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
     </form>
     <form class="auth-card" id="invite-signup-form" hidden>
@@ -67,7 +67,9 @@
       <nav class="navigation" aria-label="Main navigation">
         <a class="nav-link active" href="#overview" data-view="overview"><span class="nav-icon">⌂</span> Overview</a>
         <a class="nav-link" href="#orders" data-view="orders"><span class="nav-icon">▤</span> All orders <span class="nav-count" id="nav-order-count">0</span></a>
-        <a class="nav-link" href="#history" data-view="history"><span class="nav-icon">◷</span> Order history</a>
+        <a class="nav-link" href="#history" data-view="history"><span class="nav-icon">◷</span> User activity log</a>
+        <a class="nav-link" href="#notifications" data-view="notifications"><span class="nav-icon">♧</span> Notifications <span class="nav-count" id="nav-notification-count" hidden>0</span></a>
+        <a class="nav-link" href="#reports" data-view="reports"><span class="nav-icon">▥</span> Reports</a>
         <a class="nav-link" href="#transfer-history" data-view="transfer-history"><span class="nav-icon">↔</span> Transfer history</a>
         <a class="nav-link" href="#item-history" data-view="item-history"><span class="nav-icon">▤</span> Item history</a>
         <a class="nav-link" href="#returned-tiles" data-view="returned-tiles"><span class="nav-icon">↩</span> Returned tiles</a>
@@ -105,8 +107,8 @@
           <div><p class="eyebrow">YOUR BUSINESS AT A GLANCE</p><h1 id="welcome-title"><span id="welcome-greeting">Good day</span>, <span id="welcome-user">Ahmed</span> <span class="wave">✳</span></h1><p class="welcome-copy">Keep every order organized, from the first item to the final delivery.</p></div>
           <div class="overview-actions">
             <button class="button button-secondary" type="button" id="upload-order-pdf">Upload order PDF</button>
-            <button class="button button-secondary" type="button" id="export-data" hidden>Export orders for online use</button>
-            <button class="button button-secondary" type="button" id="import-data" hidden>Import local backup</button>
+            <button class="button button-secondary" type="button" id="export-data" hidden>Export workspace backup</button>
+            <button class="button button-secondary" type="button" id="import-data" hidden>Restore workspace backup</button>
             <button class="button button-primary" type="button" data-action="new-order"><span class="button-plus">＋</span> Create new order</button>
             <input id="order-pdf-file" type="file" accept=".pdf,application/pdf" hidden>
             <input id="data-backup-file" type="file" accept=".json,application/json" hidden>
@@ -117,9 +119,12 @@
         </div>
 
         <div class="stat-grid">
-          <article class="stat-card"><div class="stat-top"><span class="stat-label">TOTAL ORDERS</span><span class="stat-icon icon-lilac">▤</span></div><div class="stat-number" id="stat-total">0</div><div class="stat-foot"><span class="stat-foot-label">Saved on this device</span></div></article>
-          <article class="stat-card"><div class="stat-top"><span class="stat-label">OPEN ORDERS</span><span class="stat-icon icon-amber">◷</span></div><div class="stat-number" id="stat-open">0</div><div class="stat-foot"><span class="mini-dot amber-dot"></span><span class="stat-foot-label">Awaiting fulfilment</span></div></article>
-          <article class="stat-card"><div class="stat-top"><span class="stat-label">COMPLETED</span><span class="stat-icon icon-green">✓</span></div><div class="stat-number" id="stat-completed">0</div><div class="stat-foot"><span class="mini-dot green-dot"></span><span class="stat-foot-label">Delivered or collected</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">TOTAL ORDERS</span><span class="stat-icon icon-lilac">▤</span></div><div class="stat-number" id="stat-total">0</div><div class="stat-foot"><span class="stat-foot-label">Saved in the workspace</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">PENDING</span><span class="stat-icon icon-amber">◷</span></div><div class="stat-number" id="stat-pending">0</div><div class="stat-foot"><span class="stat-foot-label">Awaiting fulfilment</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">IN PROGRESS</span><span class="stat-icon icon-lilac">↗</span></div><div class="stat-number" id="stat-in-progress">0</div><div class="stat-foot"><span class="stat-foot-label">Being fulfilled</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">DELIVERED</span><span class="stat-icon icon-green">✓</span></div><div class="stat-number" id="stat-delivered">0</div><div class="stat-foot"><span class="stat-foot-label">Completed orders</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">CANCELLED</span><span class="stat-icon icon-amber">×</span></div><div class="stat-number" id="stat-cancelled">0</div><div class="stat-foot"><span class="stat-foot-label">Cancelled orders</span></div></article>
+          <article class="stat-card low-stock-stat-card"><div class="stat-top"><span class="stat-label">LOW STOCK</span><span class="stat-icon icon-amber">!</span></div><div class="stat-number" id="stat-low-stock">0</div><div class="stat-foot"><span class="stat-foot-label">Products at or below threshold</span></div></article>
         </div>
 
         <div class="section-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>Recent orders</h2></div><button class="text-button" type="button" data-action="all-orders">View all orders <span>→</span></button></div>
@@ -132,12 +137,13 @@
 
       <section class="view" id="orders-view" aria-labelledby="orders-title">
         <div class="page-heading"><div><p class="eyebrow">YOUR BUSINESS RECORDS</p><h1 id="orders-title">All orders</h1><p class="welcome-copy">Review, update, and print your saved orders.</p></div><button class="button button-primary" type="button" data-action="new-order"><span class="button-plus">＋</span> Create new order</button></div>
-        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search customer or order number" aria-label="Search orders"></label><label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Open">Open</option><option value="In progress">In progress</option><option value="Completed">Completed</option></select></label><label class="filter-select filter-date"><span class="sr-only">Filter by order date</span><input id="order-date-filter" type="date" aria-label="Filter by order date"></label></div>
+        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search customer or order number" aria-label="Search orders"></label><label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="In progress">In progress</option><option value="Delivered">Delivered</option><option value="Cancelled">Cancelled</option></select></label><label class="filter-select filter-date"><span class="sr-only">Filter by order date</span><input id="order-date-filter" type="date" aria-label="Filter by order date"></label></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th data-order-sort="id">ORDER</th><th data-order-sort="customer">CUSTOMER</th><th data-order-sort="transferId">TRANSFER ID</th><th data-order-sort="date">DATE</th><th data-order-sort="status">STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="all-orders"></tbody></table></div><div class="empty-state" id="orders-empty"><span class="empty-icon">⌕</span><strong>No matching orders</strong><span>Try changing your search or create a new order.</span></div></div>
       </section>
 
       <section class="view" id="catalog-view" aria-labelledby="catalog-title">
         <div class="page-heading"><div><p class="eyebrow">WAREHOUSE WORKBOOK</p><h1 id="catalog-title">Product catalog</h1><p class="welcome-copy">Products and quantities loaded from the warehouse Excel workbook.</p></div><div class="catalog-actions"><button class="button button-secondary" type="button" id="add-catalog-product">Add product</button><button class="button button-secondary" type="button" id="export-catalog">Export filtered data</button><button class="button button-secondary" type="button" id="upload-workbook">Upload Excel workbook</button><input id="workbook-file" type="file" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" hidden><span class="item-count"><span id="catalog-view-count">0</span> products</span></div></div>
+        <form class="low-stock-settings panel" id="low-stock-form"><label class="field"><span>Low-stock alert threshold (R/QUANTITY)</span><input id="low-stock-threshold" type="number" min="0" step="any" required></label><button class="button button-secondary" type="submit">Save threshold</button><span id="low-stock-status" role="status" aria-live="polite"></span></form>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="catalog-search" type="search" placeholder="Search product, code, unit, or quantity" aria-label="Search product catalog"></label></div>
         <div class="catalog-filter-panel" id="catalog-filter-panel" aria-label="Catalog filters">
           <div class="catalog-filter-fields">
@@ -182,11 +188,14 @@
           <div class="field-grid">
             <label class="field"><span>Returned from <i>*</i></span><input id="return-customer" maxlength="160" required></label>
             <label class="field"><span>Tile / product <i>*</i></span><input id="return-product" list="product-catalog" maxlength="200" required></label>
-            <label class="field"><span>Branch</span><input id="return-branch" maxlength="80"></label>
-            <label class="field"><span>Delivered driver</span><input id="return-driver" maxlength="120"></label>
+            <label class="field"><span>Branch</span><input id="return-branch" list="returned-tile-branches" maxlength="80"></label>
             <label class="field"><span>Cartons</span><input id="return-cartons" type="number" min="0" step="any" value="0" required></label>
             <label class="field"><span>FIRI</span><input id="return-firi" type="number" min="0" step="any" value="0" required></label>
-            <label class="field"><span>Delivered date</span><input id="return-delivered-date" type="date"></label>
+            <fieldset class="returned-delivered-details">
+              <legend>Delivered details</legend>
+              <label class="field"><span>Delivered driver</span><input id="return-driver" list="returned-tile-drivers" maxlength="120"></label>
+              <label class="field"><span>Delivered date</span><input id="return-delivered-date" type="date"></label>
+            </fieldset>
             <fieldset class="returned-taken-details">
               <legend>Taken details</legend>
               <label class="field"><span>Taken date <i>*</i></span><input id="return-date" type="date" required></label>
@@ -196,14 +205,38 @@
           <div class="form-actions"><span class="auth-status" id="returned-tile-status" role="status" aria-live="polite"></span><div><button class="button button-quiet" id="cancel-returned-tile-edit" type="button" hidden>Cancel edit</button><button class="button button-primary" id="save-returned-tile" type="submit">Save return</button></div></div>
         </form>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="returned-tiles-search" type="search" placeholder="Search customer, product, branch, or driver" aria-label="Search returned tiles"></label><span class="item-count"><span id="returned-tiles-count">0</span> returns</span><button class="button button-secondary" type="button" id="export-returned-tiles">Export visible data</button></div>
-        <div class="table-card"><div class="table-scroll"><table class="returned-tiles-table"><thead><tr><th>RETURNED FROM</th><th>PRODUCT</th><th>BRANCH</th><th>DELIVERED DRIVER</th><th>CARTONS</th><th>FIRI</th><th>DELIVERED DATE</th><th>TAKEN DATE</th><th>TAKEN BY</th><th>USER CREATED</th></tr><tr class="returned-tiles-column-filters"><th><input type="search" data-returned-tile-filter="0" placeholder="Search" aria-label="Search returned from"></th><th><input type="search" data-returned-tile-filter="1" placeholder="Search" aria-label="Search product"></th><th><input type="search" data-returned-tile-filter="2" placeholder="Search" aria-label="Search branch"></th><th><input type="search" data-returned-tile-filter="3" placeholder="Search" aria-label="Search delivered driver"></th><th><input type="search" data-returned-tile-filter="4" placeholder="Search" aria-label="Search cartons"></th><th><input type="search" data-returned-tile-filter="5" placeholder="Search" aria-label="Search FIRI"></th><th><input type="search" data-returned-tile-filter="6" placeholder="Search" aria-label="Search delivered date"></th><th><input type="search" data-returned-tile-filter="7" placeholder="Search" aria-label="Search taken date"></th><th><input type="search" data-returned-tile-filter="8" placeholder="Search" aria-label="Search taken by"></th><th><input type="search" data-returned-tile-filter="9" placeholder="Search" aria-label="Search user created"></th></tr></thead><tbody id="returned-tiles"></tbody></table></div><div class="empty-state" id="returned-tiles-empty"><span class="empty-icon">↩</span><strong>No returned tiles yet</strong><span>Register a return or import the existing Excel history.</span></div></div>
+        <div class="table-card"><div class="table-scroll"><table class="returned-tiles-table"><thead><tr><th>RETURNED FROM</th><th>PRODUCT</th><th>BRANCH</th><th>DELIVERED DRIVER</th><th>DELIVERED DATE</th><th>CARTONS</th><th>FIRI</th><th>TAKEN DATE</th><th>TAKEN BY</th><th>USER CREATED</th></tr><tr class="returned-tiles-column-filters"><th><input type="search" data-returned-tile-filter="0" placeholder="Search" aria-label="Search returned from"></th><th><input type="search" data-returned-tile-filter="1" placeholder="Search" aria-label="Search product"></th><th><input type="search" data-returned-tile-filter="2" placeholder="Search" aria-label="Search branch"></th><th><input type="search" data-returned-tile-filter="3" placeholder="Search" aria-label="Search delivered driver"></th><th><input type="search" data-returned-tile-filter="4" placeholder="Search delivered date" aria-label="Search delivered date"></th><th><input type="search" data-returned-tile-filter="5" placeholder="Search" aria-label="Search cartons"></th><th><input type="search" data-returned-tile-filter="6" placeholder="Search" aria-label="Search FIRI"></th><th><input type="search" data-returned-tile-filter="7" placeholder="Search" aria-label="Search taken date"></th><th><input type="search" data-returned-tile-filter="8" placeholder="Search" aria-label="Search taken by"></th><th><input type="search" data-returned-tile-filter="9" placeholder="Search user created"></th></tr></thead><tbody id="returned-tiles"></tbody></table></div><div class="empty-state" id="returned-tiles-empty"><span class="empty-icon">↩</span><strong>No returned tiles yet</strong><span>Register a return or import the existing Excel history.</span></div></div>
         <p class="auth-status" id="returned-tiles-import-status" role="status" aria-live="polite" hidden></p>
       </section>
 
       <section class="view" id="history-view" aria-labelledby="history-title">
-        <div class="page-heading"><div><p class="eyebrow">ORDER AUDIT TRAIL</p><h1 id="history-title">Order history</h1><p class="welcome-copy">Review order creation, edits, status changes, and deletions.</p></div><button class="button button-secondary" type="button" id="history-show-all">Show all history</button></div>
+        <div class="page-heading"><div><p class="eyebrow">WORKSPACE AUDIT TRAIL</p><h1 id="history-title">User activity log</h1><p class="welcome-copy">Review who created or edited orders and returned tiles.</p></div><button class="button button-secondary" type="button" id="history-show-all">Show all activity</button></div>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="history-search" type="search" placeholder="Search order, customer, or activity" aria-label="Search order history"></label><span id="history-filter-label" class="history-filter-label"></span></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th>WHEN</th><th>USER</th><th>ORDER</th><th>CUSTOMER</th><th>ACTIVITY</th></tr></thead><tbody id="order-history"></tbody></table></div><div class="empty-state" id="history-empty"><span class="empty-icon">◷</span><strong>No history yet</strong><span>Order activity will appear here.</span></div></div>
+      </section>
+
+      <section class="view" id="notifications-view" aria-labelledby="notifications-title">
+        <div class="page-heading"><div><p class="eyebrow">WORKSPACE UPDATES</p><h1 id="notifications-title">Notifications</h1><p class="welcome-copy">Order assignments, updates, and orders marked in progress appear here.</p></div><button class="button button-secondary" type="button" id="notifications-mark-read">Mark all as read</button></div>
+        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>WHEN</th><th>UPDATE</th><th>ORDER</th><th>CUSTOMER</th><th>USER</th></tr></thead><tbody id="notifications-list"></tbody></table></div><div class="empty-state" id="notifications-empty"><span class="empty-icon">♧</span><strong>No notifications</strong><span>Order updates will appear here.</span></div></div>
+      </section>
+
+      <section class="view" id="reports-view" aria-labelledby="reports-title">
+        <div class="page-heading"><div><p class="eyebrow">WORKSPACE REPORTS</p><h1 id="reports-title">Reports</h1><p class="welcome-copy">Summarize orders, transfers, returns, and quantities by date, product, or branch.</p></div><button class="button button-secondary" type="button" id="export-report">Export CSV</button></div>
+        <div class="report-filters panel">
+          <label class="field"><span>From</span><input id="report-date-from" type="date"></label>
+          <label class="field"><span>To</span><input id="report-date-to" type="date"></label>
+          <label class="field"><span>Product contains</span><input id="report-product-filter" type="search" placeholder="Any product"></label>
+          <label class="field"><span>Branch contains</span><input id="report-branch-filter" type="search" placeholder="Any branch"></label>
+          <button class="button button-secondary" type="button" id="report-clear-filters">Clear filters</button>
+        </div>
+        <div class="report-summary-grid">
+          <article class="stat-card"><span class="stat-label">ORDERS</span><strong id="report-order-count">0</strong></article>
+          <article class="stat-card"><span class="stat-label">TRANSFERS</span><strong id="report-transfer-count">0</strong></article>
+          <article class="stat-card"><span class="stat-label">RETURNS</span><strong id="report-return-count">0</strong></article>
+          <article class="stat-card"><span class="stat-label">ORDERED QTY</span><strong id="report-ordered-quantity">0</strong></article>
+          <article class="stat-card"><span class="stat-label">RETURNED CARTONS / FIRI</span><strong id="report-returned-quantity">0 / 0</strong></article>
+        </div>
+        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>TYPE</th><th>DATE</th><th>REFERENCE</th><th>BRANCH</th><th>PRODUCT</th><th>QUANTITY</th><th>UNIT</th></tr></thead><tbody id="report-rows"></tbody></table></div><div class="empty-state" id="reports-empty"><span class="empty-icon">▥</span><strong>No report data</strong><span>Try changing the date, product, or branch filters.</span></div></div>
       </section>
 
       <section class="view" id="transfer-history-view" aria-labelledby="transfer-history-title">
@@ -219,10 +252,10 @@
       </section>
 
       <section class="view" id="users-view" aria-labelledby="users-title">
-        <div class="page-heading"><div><p class="eyebrow">WORKSPACE ACCESS</p><h1 id="users-title">Users</h1><p class="welcome-copy">Invite staff and manage access to the shared workspace.</p></div><button class="button button-secondary" type="button" id="users-refresh">Refresh users</button></div>
+        <div class="page-heading"><div><p class="eyebrow">WORKSPACE ACCESS</p><h1 id="users-title">Users</h1><p class="welcome-copy">Create user accounts and manage access to the shared workspace.</p></div><button class="button button-secondary" type="button" id="users-refresh">Refresh users</button></div>
         <div class="builder-layout users-layout">
           <section class="panel" aria-labelledby="user-form-title">
-            <div class="panel-heading"><div><h2 id="user-form-title">Invite a user</h2><p id="user-form-help">They’ll receive an email invitation to set their password.</p></div></div>
+            <div class="panel-heading"><div><h2 id="user-form-title">Create a user</h2><p id="user-form-help">Set an initial password, then share it with the user securely.</p></div></div>
             <form id="user-form">
               <input id="managed-user-id" type="hidden">
               <label class="field">Username
@@ -231,6 +264,15 @@
               <label class="field">Email
                 <input class="item-input" id="managed-user-email" type="email" maxlength="254" autocomplete="email" required>
               </label>
+              <div id="managed-user-password-fields">
+                <label class="field">Initial password
+                  <input class="item-input" id="managed-user-password" type="password" minlength="8" autocomplete="new-password" required>
+                </label>
+                <label class="field">Confirm initial password
+                  <input class="item-input" id="managed-user-password-confirm" type="password" minlength="8" autocomplete="new-password" required>
+                </label>
+                <p class="auth-copy">The password is sent securely to Supabase Auth and is never saved in the workspace tables.</p>
+              </div>
               <label class="field" id="managed-user-role-field">Role
                 <select class="item-input" id="managed-user-role">
                   <option value="staff">Staff</option>
@@ -238,15 +280,15 @@
                   <option value="owner">Owner</option>
                 </select>
               </label>
-              <p class="auth-copy" id="user-role-help">Admins can invite and manage staff. Only the owner can grant or remove admin access.</p>
-              <div class="form-actions"><div><button class="button button-primary" id="save-managed-user" type="submit">Send invitation</button><button class="button button-quiet" id="cancel-user-edit" type="button" hidden>Cancel</button></div></div>
+              <p class="auth-copy" id="user-role-help">Admins can create and manage staff. Only the owner can grant or remove admin access.</p>
+              <div class="form-actions"><div><button class="button button-primary" id="save-managed-user" type="submit">Create user</button><button class="button button-quiet" id="cancel-user-edit" type="button" hidden>Cancel</button></div></div>
               <p class="auth-status" id="users-status" role="status" aria-live="polite"></p>
             </form>
           </section>
           <section class="panel users-list-panel" aria-labelledby="workspace-users-heading">
             <div class="panel-heading"><div><h2 id="workspace-users-heading">Workspace users</h2><p>Inactive users can no longer sign in; their records remain available.</p></div></div>
             <div class="table-scroll"><table><thead><tr><th>USERNAME</th><th>EMAIL</th><th>ROLE</th><th>STATUS</th><th>LAST SIGN-IN</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="workspace-users"></tbody></table></div>
-            <div class="empty-state" id="users-empty" hidden><strong>No workspace users found</strong><span>Invite a staff member to get started.</span></div>
+            <div class="empty-state" id="users-empty" hidden><strong>No workspace users found</strong><span>Create a user to get started.</span></div>
           </section>
         </div>
       </section>
@@ -405,5 +447,7 @@
   </div>
   <datalist id="product-catalog"></datalist>
   <datalist id="saved-drivers"></datalist>
+  <datalist id="returned-tile-branches"></datalist>
+  <datalist id="returned-tile-drivers"></datalist>
 </body>
 </html>

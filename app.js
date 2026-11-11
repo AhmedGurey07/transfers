@@ -89,6 +89,7 @@
     }
   };
   let productCatalog = window.AHMED_GUREY_PRODUCTS;
+  let lowStockThreshold = 10;
   if (!Array.isArray(productCatalog)) throw new Error("The warehouse product catalog did not load.");
   function cleanPdfText(value) {
     return String(value || "")
@@ -207,6 +208,14 @@
     });
   }
 
+  function remainingStockValues(item) {
+    const values = Array.isArray(item.rQuantities) ? item.rQuantities : [item.rQuantities];
+    return values.map((value) => String(value ?? "").trim())
+      .filter(Boolean)
+      .map(Number)
+      .filter(Number.isFinite);
+  }
+
   function renderProductCatalogTable() {
     const filterFields = [
       ["product", "PRODUCT"], ["quantities", "QUANTITY"], ["qtyItems", "Q/ITEM"],
@@ -221,6 +230,10 @@
     const target = $("#catalog-products");
     target.replaceChildren(...filtered.map((item) => {
       const row = document.createElement("tr");
+      const stock = remainingStockValues(item);
+      if (stock.length && Math.min(...stock) <= lowStockThreshold) {
+        row.classList.add("low-stock-row");
+      }
       row.title = "Click to preview this product";
       row.addEventListener("click", () => openCatalogPreview(item));
       const product = document.createElement("td");
@@ -752,7 +765,39 @@
       : new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(date);
   }
 
+  function normalizeReturnedTileBranch(value) {
+    const branch = String(value || "").trim();
+    const aliases = { DUM: "DMQ", IDC1: "IDC", NH: "NHG" };
+    return aliases[branch.toLocaleUpperCase()] || branch;
+  }
+
+  function normalizeReturnedTileDriver(value) {
+    const driver = String(value || "").trim();
+    const aliases = { XASSAN: "HASSAN", XUSEEN: "HUSSEIN", HUSEIN: "HUSSEIN" };
+    return aliases[driver.toLocaleUpperCase()] || driver;
+  }
+
+  function renderReturnedTileSuggestions() {
+    [
+      ["branch", "#returned-tile-branches"],
+      ["driver", "#returned-tile-drivers"]
+    ].forEach(([field, selector]) => {
+      const values = [...new Set(returnedTiles
+        .map((entry) => field === "branch"
+          ? normalizeReturnedTileBranch(entry[field])
+          : normalizeReturnedTileDriver(entry[field]))
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })))];
+      $(selector).replaceChildren(...values.map((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        return option;
+      }));
+    });
+  }
+
   function renderReturnedTiles() {
+    renderReturnedTileSuggestions();
     const status = $("#returned-tile-status");
     const unavailable = Boolean(returnedTilesSetupError);
     $("#save-returned-tile").disabled = unavailable;
@@ -771,24 +816,24 @@
     const valuesForEntry = (entry) => [
       entry.returnedFrom || "—",
       entry.product || "—",
-      entry.branch || "—",
-      entry.driver || "—",
+      normalizeReturnedTileBranch(entry.branch) || "—",
+      normalizeReturnedTileDriver(entry.driver) || "—",
+      returnedTileDate(entry.returnedDate),
       formatCatalogNumber(entry.cartons),
       formatCatalogNumber(entry.firi),
-      returnedTileDate(entry.returnedDate),
       returnedTileDate(entry.deliveredDate),
       entry.returnedBy || "—",
       entry.recordedBy || "—"
     ];
     const entries = [...returnedTiles]
       .filter((entry) => [
-        entry.returnedFrom, entry.product, entry.branch, entry.driver,
+        entry.returnedFrom, entry.product, normalizeReturnedTileBranch(entry.branch), normalizeReturnedTileDriver(entry.driver),
         entry.returnedBy, entry.recordedBy, entry.sourceNo
       ].join(" ").toLocaleLowerCase().includes(query))
       .filter((entry) => {
         const values = valuesForEntry(entry);
         return columnQueries.every(({ index, query: columnQuery }) => {
-          const dateSearchValue = index === 6 ? entry.returnedDate : index === 7 ? entry.deliveredDate : "";
+          const dateSearchValue = index === 4 ? entry.returnedDate : index === 7 ? entry.deliveredDate : "";
           return `${values[index]} ${dateSearchValue}`.toLocaleLowerCase().includes(columnQuery);
         });
       })
@@ -846,8 +891,8 @@
     $("#returned-tile-form-title").textContent = "Edit returned tile";
     $("#return-customer").value = entry.returnedFrom || "";
     $("#return-product").value = entry.product || "";
-    $("#return-branch").value = entry.branch || "";
-    $("#return-driver").value = entry.driver || "";
+    $("#return-branch").value = normalizeReturnedTileBranch(entry.branch);
+    $("#return-driver").value = normalizeReturnedTileDriver(entry.driver);
     $("#return-cartons").value = String(entry.cartons ?? 0);
     $("#return-firi").value = String(entry.firi ?? 0);
     $("#return-delivered-date").value = entry.deliveredDate || "";
@@ -917,8 +962,8 @@
       createdAt: existing?.createdAt || now,
       returnedFrom: $("#return-customer").value.trim(),
       product: $("#return-product").value.trim(),
-      branch: $("#return-branch").value.trim(),
-      driver: $("#return-driver").value.trim(),
+      branch: normalizeReturnedTileBranch($("#return-branch").value),
+      driver: normalizeReturnedTileDriver($("#return-driver").value),
       cartons,
       firi,
       deliveredDate: $("#return-delivered-date").value,
@@ -930,6 +975,21 @@
         returnEditedBy: usernameForUser(cloudUser)
       } : {})
     });
+    const priorHistory = Array.isArray(existing?.history)
+      ? [...existing.history]
+      : existing ? [{
+        timestamp: Number(existing.createdAt) || now,
+        action: "Return created",
+        actor: existing.recordedBy || "Unknown user",
+        details: "Return saved."
+      }] : [];
+    priorHistory.push({
+      timestamp: now,
+      action: existing ? "Return edited" : "Return created",
+      actor: usernameForUser(cloudUser),
+      details: existing ? "Return details updated." : "Return saved."
+    });
+    entry.history = priorHistory;
     const previousEntries = returnedTiles;
     returnedTiles = existing
       ? returnedTiles.map((candidate) => candidate.id === entry.id ? entry : candidate)
@@ -1071,8 +1131,8 @@
         sourceNo,
         returnedFrom,
         product,
-        branch: returnedTileWorkbookCellText(cell(row, "branch")),
-        driver: returnedTileWorkbookCellText(cell(row, "driver")),
+        branch: normalizeReturnedTileBranch(returnedTileWorkbookCellText(cell(row, "branch"))),
+        driver: normalizeReturnedTileDriver(returnedTileWorkbookCellText(cell(row, "driver"))),
         cartons: number(cell(row, "cartons")),
         firi: number(cell(row, "firi")),
         deliveredDate: returnedTileWorkbookDate(cell(row, "deliveredDate")),
@@ -1167,7 +1227,7 @@
     status.classList.toggle("error", isError);
   }
 
-  function applySyncedSourceData(data) {
+  function validateSyncedSourceData(data) {
     if (!Array.isArray(data.products) || !data.products.length
       || data.products.some((item) => !item || typeof item.product !== "string"
         || typeof item.unit !== "string" || !Array.isArray(item.qtyItems)
@@ -1192,7 +1252,16 @@
         throw new Error(`The updated source is missing valid gypsum converter values for ${key}.`);
       }
     }
+  }
+
+  function applySyncedSourceData(data) {
+    validateSyncedSourceData(data);
     productCatalog = data.products;
+    if (data.lowStockThreshold != null
+      && Number.isFinite(Number(data.lowStockThreshold)) && Number(data.lowStockThreshold) >= 0) {
+      lowStockThreshold = Number(data.lowStockThreshold);
+      $("#low-stock-threshold").value = String(lowStockThreshold);
+    }
     if (Array.isArray(data.adjustments)) catalogAdjustments = data.adjustments;
     if (Array.isArray(data.catalogEditHistory)) catalogEditHistory = data.catalogEditHistory;
     window.AHMED_GUREY_PRODUCTS = productCatalog;
@@ -1233,7 +1302,8 @@
       converters,
       gypsumConverters,
       adjustments: catalogAdjustments,
-      catalogEditHistory
+      catalogEditHistory,
+      lowStockThreshold
     };
   }
 
@@ -1291,6 +1361,38 @@
     if (error) throw error;
     if (data?.data && catalogHasWorkbookColumns(data.data)) applySyncedSourceData(data.data);
     return Boolean(data?.data);
+  }
+
+  async function saveLowStockThreshold(event) {
+    event.preventDefault();
+    const input = $("#low-stock-threshold");
+    const status = $("#low-stock-status");
+    const threshold = Number(input.value);
+    if (!Number.isFinite(threshold) || threshold < 0) {
+      status.textContent = "Enter a valid threshold of zero or more.";
+      status.classList.add("error");
+      return;
+    }
+    const previousThreshold = lowStockThreshold;
+    lowStockThreshold = threshold;
+    status.textContent = "Saving threshold…";
+    status.classList.remove("error");
+    try {
+      if (cloudDeployment) {
+        await saveCatalogToCloud(currentCatalogData(), false);
+      } else {
+        localStorage.setItem("shaafici-order-desk-low-stock-threshold", String(threshold));
+      }
+      renderProductCatalogTable();
+      renderOverview();
+      status.textContent = "Low-stock threshold saved.";
+    } catch (error) {
+      lowStockThreshold = previousThreshold;
+      input.value = String(previousThreshold);
+      console.error("Could not save the low-stock threshold.", error);
+      status.textContent = error.message || "Could not save the threshold.";
+      status.classList.add("error");
+    }
   }
 
   function exportCatalogToExcel() {
@@ -1625,6 +1727,18 @@
         || typeof entry.returnedFrom !== "string" || typeof entry.product !== "string")) {
         throw new Error("The shared returned-tile history contains an invalid record.");
       }
+      const branchUpdates = returnResult.data.flatMap((row, index) => {
+        const branch = row.data.branch ? normalizeReturnedTileBranch(row.data.branch) : row.data.branch;
+        const driver = row.data.driver ? normalizeReturnedTileDriver(row.data.driver) : row.data.driver;
+        if (branch === row.data.branch && driver === row.data.driver) return [];
+        returnedTiles[index] = { ...row.data, branch, driver };
+        return [{ id: row.id, data: returnedTiles[index], updated_at: new Date().toISOString() }];
+      });
+      for (let offset = 0; offset < branchUpdates.length; offset += 500) {
+        const { error } = await supabaseClient.from("returned_tile_records")
+          .upsert(branchUpdates.slice(offset, offset + 500), { onConflict: "id" });
+        if (error) throw new Error(`Could not normalize existing returned-tile branch names: ${error.message}`);
+      }
     }
     if (catalogResult.data?.data && catalogHasWorkbookColumns(catalogResult.data.data)) {
       applySyncedSourceData(catalogResult.data.data);
@@ -1678,6 +1792,9 @@
     renderOverview();
     renderAllOrders();
     renderHistory();
+    if ($("#catalog-view").classList.contains("active")) renderProductCatalogTable();
+    if ($("#returned-tiles-view").classList.contains("active")) renderReturnedTiles();
+    if ($("#reports-view").classList.contains("active")) renderReports();
     refreshPreview();
     setSyncStatus("Online · orders and drivers sync across signed-in devices.");
   }
@@ -1717,9 +1834,12 @@
   function resetManagedUserForm() {
     $("#user-form").reset();
     $("#managed-user-id").value = "";
-    $("#user-form-title").textContent = "Invite a user";
-    $("#user-form-help").textContent = "They’ll receive an email invitation to set their password.";
-    $("#save-managed-user").textContent = "Send invitation";
+    $("#managed-user-password-fields").hidden = false;
+    $("#managed-user-password").required = true;
+    $("#managed-user-password-confirm").required = true;
+    $("#user-form-title").textContent = "Create a user";
+    $("#user-form-help").textContent = "Set an initial password, then share it with the user securely.";
+    $("#save-managed-user").textContent = "Create user";
     $("#cancel-user-edit").hidden = true;
     $("#managed-user-email").readOnly = false;
     $("#managed-user-role").value = "staff";
@@ -1805,6 +1925,9 @@
     $("#managed-user-role-field").hidden = cloudRole !== "owner";
     $("#managed-user-role").querySelector('option[value="owner"]').hidden = user.role !== "owner";
     $("#managed-user-role").disabled = user.role === "owner";
+    $("#managed-user-password-fields").hidden = true;
+    $("#managed-user-password").required = false;
+    $("#managed-user-password-confirm").required = false;
     $("#user-form-title").textContent = "Edit user";
     $("#user-form-help").textContent = user.role === "owner"
       ? "The owner role cannot be changed."
@@ -1835,23 +1958,33 @@
     }
     const submit = $("#save-managed-user");
     const userId = $("#managed-user-id").value;
+    const password = $("#managed-user-password").value;
+    const passwordConfirmation = $("#managed-user-password-confirm").value;
     const payload = {
       name: $("#managed-user-name").value.trim(),
       email: $("#managed-user-email").value.trim(),
       role: cloudRole === "owner" ? $("#managed-user-role").value : "staff"
     };
+    if (!userId && password.length < 8) {
+      setUsersStatus("Use an initial password with at least 8 characters.", true);
+      return;
+    }
+    if (!userId && password !== passwordConfirmation) {
+      setUsersStatus("The initial passwords do not match.", true);
+      return;
+    }
     submit.disabled = true;
-    setUsersStatus(userId ? "Saving user changes…" : "Sending invitation…");
+    setUsersStatus(userId ? "Saving user changes…" : "Creating user account…");
     try {
       const result = await invokeUserManagement(userId
         ? { action: "update", userId, ...payload }
-        : { action: "invite", ...payload });
+        : { action: "create", ...payload, password });
       resetManagedUserForm();
       const successMessage = userId
         ? result.emailChangePending
           ? "User updated. A confirmation email was sent to the new address."
           : "User updated."
-        : "Invitation sent. The user must accept it to set a password.";
+        : "User created and saved to the workspace. Share the initial password securely.";
       await loadWorkspaceUsers();
       setUsersStatus(successMessage);
     } catch (error) {
@@ -1862,15 +1995,7 @@
     }
   }
 
-  function exportLocalBackup() {
-    if (cloudDeployment) return;
-    const backup = {
-      format: "shaafici-order-desk-backup",
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      orders,
-      drivers
-    };
+  function downloadWorkspaceBackup(backup) {
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], {
       type: "application/json"
     }));
@@ -1879,7 +2004,24 @@
     link.download = `shaafici-order-desk-backup-${dateValue()}.json`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast(`${orders.length} ${orders.length === 1 ? "order" : "orders"} exported. Keep the backup file safe.`);
+  }
+
+  function exportWorkspaceBackup() {
+    if (cloudDeployment && (!cloudUser || !["owner", "admin"].includes(cloudRole))) {
+      showToast("Only workspace admins can export a full backup.");
+      return;
+    }
+    const backup = {
+      format: "shaafici-order-desk-backup",
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      orders,
+      drivers,
+      returnedTiles,
+      catalog: currentCatalogData()
+    };
+    downloadWorkspaceBackup(backup);
+    showToast(`Backup exported with ${orders.length} orders, ${drivers.length} drivers, and ${returnedTiles.length} returns. Keep the file safe.`);
   }
 
   async function importOnlineBackup(file) {
@@ -1887,12 +2029,19 @@
     status.hidden = false;
     status.classList.remove("error");
     try {
-      if (!cloudDeployment || !cloudUser) throw new Error("Sign in to the online workspace before importing a backup.");
+      if (!cloudDeployment || !cloudUser || !["owner", "admin"].includes(cloudRole)) {
+        throw new Error("Only signed-in workspace admins can restore a backup.");
+      }
       if (file.size > 25 * 1024 * 1024) throw new Error("The backup file is larger than the 25 MB import limit.");
       const backup = JSON.parse(await file.text());
-      if (!backup || backup.format !== "shaafici-order-desk-backup" || backup.version !== 1
+      if (!backup || backup.format !== "shaafici-order-desk-backup" || ![1, 2].includes(backup.version)
         || !Array.isArray(backup.orders) || !Array.isArray(backup.drivers)) {
         throw new Error("This is not a supported Order Desk backup file.");
+      }
+      const backupReturns = backup.version === 2 ? backup.returnedTiles : [];
+      if (backup.version === 2 && (!Array.isArray(backupReturns) || !backup.catalog
+        || !Array.isArray(backup.catalog.products))) {
+        throw new Error("The full backup is missing its returned tiles or product catalog.");
       }
       if (backup.orders.some((order) => !order || typeof order.id !== "string" || !order.id.trim()
         || !Array.isArray(order.items))) {
@@ -1902,48 +2051,39 @@
         || typeof driver.phone !== "string" || !driver.name.trim() || !driver.phone.trim())) {
         throw new Error("The backup contains an invalid saved driver.");
       }
-      const importedOrders = loadOrders(backup.orders);
-      if (importedOrders.length !== backup.orders.length
-        || new Set(importedOrders.map((order) => order.id)).size !== importedOrders.length) {
-        throw new Error("The backup contains duplicate or unsupported orders.");
+      if (backupReturns.some((entry) => !entry || typeof entry.id !== "string" || !entry.id.trim()
+        || typeof entry.returnedFrom !== "string" || typeof entry.product !== "string")) {
+        throw new Error("The backup contains an invalid returned-tile record.");
       }
-      const existingOrderResult = await supabaseClient.from("orders").select("id");
-      if (existingOrderResult.error) throw existingOrderResult.error;
-      const existingOrderIds = new Set(existingOrderResult.data.map((row) => row.id));
-      const missingOrders = importedOrders.filter((order) => !existingOrderIds.has(order.id));
-      if (missingOrders.length) {
-        const { error } = await supabaseClient.from("orders").upsert(
-          missingOrders.map((order) => ({ id: order.id, data: order })),
-          { onConflict: "id" }
-        );
-        if (error) throw error;
+      if (new Set(backupReturns.map((entry) => entry.id)).size !== backupReturns.length) {
+        throw new Error("The backup contains duplicate returned-tile IDs.");
       }
-
-      const existingDriverResult = await supabaseClient.from("drivers").select("driver_key");
-      if (existingDriverResult.error) throw existingDriverResult.error;
-      const existingDriverKeys = new Set(existingDriverResult.data.map((row) => row.driver_key));
-      const knownDriverKeys = new Set();
-      const missingDrivers = loadDrivers(backup.drivers).filter((driver) => {
-        const key = driver.phone.trim();
-        if (existingDriverKeys.has(key) || knownDriverKeys.has(key)) return false;
-        knownDriverKeys.add(key);
-        return true;
-      });
-      if (missingDrivers.length) {
-        const { error } = await supabaseClient.from("drivers").upsert(
-          missingDrivers.map((driver) => ({
-            driver_key: driver.phone.trim(),
-            name: driver.name,
-            phone: driver.phone
-          })),
-          { onConflict: "driver_key" }
-        );
-        if (error) throw error;
+      if (backup.version === 2 && !catalogHasWorkbookColumns(backup.catalog)) {
+        throw new Error("The backup contains an invalid product catalog.");
       }
-
+      if (backup.version === 2) validateSyncedSourceData(backup.catalog);
+      if (!window.confirm("Restore this backup by adding records that are missing online? Existing orders, drivers, returns, and matching products will be kept. Saved catalog settings will be restored.")) {
+        status.textContent = "Restore cancelled.";
+        return;
+      }
+      const { data, error } = await supabaseClient.functions.invoke("manage-backups", { body: { backup } });
+      if (error) {
+        let message = error.message || "Could not restore this backup.";
+        if (error.context instanceof Response) {
+          try {
+            const responseData = await error.context.clone().json();
+            if (typeof responseData.error === "string") message = responseData.error;
+          } catch (parseError) {
+            console.error("Could not read the backup-restore error response.", parseError);
+          }
+        }
+        throw new Error(message);
+      }
+      if (!data?.ok || !data.restored) throw new Error("The backup restore returned an invalid response.");
       await loadCloudData(false);
-      status.textContent = `Imported ${missingOrders.length} new ${missingOrders.length === 1 ? "order" : "orders"} and ${missingDrivers.length} saved ${missingDrivers.length === 1 ? "driver" : "drivers"}. Existing online records were kept.`;
-      showToast(`${missingOrders.length} new ${missingOrders.length === 1 ? "order" : "orders"} imported online.`);
+      const { orders: restoredOrders, drivers: restoredDrivers, returns: restoredReturns, products: restoredProducts } = data.restored;
+      status.textContent = `Restored ${restoredOrders} orders, ${restoredDrivers} drivers, ${restoredReturns} returns, and ${restoredProducts} products. Existing online records were kept.`;
+      showToast(`Backup restored. ${restoredOrders + restoredDrivers + restoredReturns + restoredProducts} new records added.`);
     } catch (error) {
       console.error("Could not import the Order Desk backup.", error);
       status.classList.add("error");
@@ -1968,7 +2108,8 @@
     if (cloudChannel) supabaseClient.removeChannel(cloudChannel);
     let channel = supabaseClient.channel("order-desk-shared-data")
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, scheduleCloudRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "drivers" }, scheduleCloudRefresh);
+      .on("postgres_changes", { event: "*", schema: "public", table: "drivers" }, scheduleCloudRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "workspace_catalog" }, scheduleCloudRefresh);
     if (!returnedTilesSetupError) {
       channel = channel.on("postgres_changes", { event: "*", schema: "public", table: "returned_tile_records" }, scheduleCloudRefresh);
     }
@@ -2068,6 +2209,14 @@
   }
 
   const isTileProduct = (product) => /\btile(?:s)?\b|\bmarmar\b/i.test(product);
+  const normalizeOrderStatus = (status) => {
+    const value = String(status || "").trim().toLowerCase();
+    if (value === "open" || value === "pending") return "Pending";
+    if (value === "in progress") return "In progress";
+    if (value === "completed" || value === "delivered") return "Delivered";
+    if (value === "cancelled" || value === "canceled") return "Cancelled";
+    return "Pending";
+  };
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const form = $("#order-form");
@@ -2109,7 +2258,7 @@
           driverPhone: order.driverPhone || "",
           preparedBy: order.preparedBy || "",
           notes: order.notes || "",
-          status: order.status || "Open",
+          status: normalizeOrderStatus(order.status),
           deletedAt: Number(order.deletedAt) || 0,
           catalogTakenApplied: Boolean(order.catalogTakenApplied),
           history,
@@ -2702,10 +2851,13 @@
     $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${name}-view`));
     $$("[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === name));
     $("#app-back-button").hidden = name === "overview";
-    const labels = { overview: "Overview", orders: "All orders", catalog: "Product catalog", history: "Order history", "transfer-history": "Transfer history", "item-history": "Item history", "returned-tiles": "Returned tiles", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
+    const labels = { overview: "Overview", orders: "All orders", catalog: "Product catalog", history: "User activity log", notifications: "Notifications", reports: "Reports", "transfer-history": "Transfer history", "item-history": "Item history", "returned-tiles": "Returned tiles", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
     $("#breadcrumb-current").textContent = labels[name] || "Overview";
     if (name === "orders") renderAllOrders();
     if (name === "history") renderHistory();
+    if (name === "notifications") renderNotifications();
+    if (name === "reports") renderReports();
+    if (name === "catalog") renderProductCatalogTable();
     if (name === "transfer-history") renderTransferHistory();
     if (name === "item-history") renderItemHistory();
     if (name === "returned-tiles") renderReturnedTiles();
@@ -4116,7 +4268,9 @@
       driverPhone: data.get("driverPhone").trim(),
       preparedBy: data.get("preparedBy").trim(),
       notes: data.get("notes").trim(),
-      status: editingId ? (orders.find((order) => order.id === editingId)?.status || "Open") : "Open",
+      status: editingId
+        ? normalizeOrderStatus(orders.find((order) => order.id === editingId)?.status)
+        : "Pending",
       items: getItems(),
       createdAt: editingId ? orders.find((order) => order.id === editingId)?.createdAt || Date.now() : Date.now()
     };
@@ -4159,6 +4313,7 @@
   }
 
   function orderRow(order) {
+    const status = normalizeOrderStatus(order.status);
     const row = document.createElement("tr");
     row.className = "clickable-order-row";
     row.tabIndex = 0;
@@ -4168,7 +4323,7 @@
       <td class="customer-cell">${escapeAttribute(order.customer)}</td>
       <td>${escapeAttribute(order.transferId || "—")}</td>
       <td>${formatDate(order.date)}</td>
-      <td><button class="status-pill status-${statusClass(order.status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(order.status)}</button></td>
+      <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button></td>
       <td class="row-actions"><button class="icon-button" type="button" aria-label="Open order ${escapeAttribute(order.id)}" title="Open order">↗</button><button class="order-action-button" type="button" data-action="history" aria-label="View history for ${escapeAttribute(order.id)}">History</button><button class="order-action-button order-delete-button" type="button" data-action="delete" aria-label="Delete order ${escapeAttribute(order.id)}">Delete</button></td>`;
     row.addEventListener("click", (event) => {
       if (event.target.closest("button, a, input, select, textarea")) return;
@@ -4190,6 +4345,7 @@
   function orderSortValue(order, key) {
     if (key === "date") return order.date || "";
     if (key === "createdAt") return Number(order.createdAt) || 0;
+    if (key === "status") return normalizeOrderStatus(order.status).toLocaleLowerCase();
     return String(order[key] || "").toLocaleLowerCase();
   }
 
@@ -4222,13 +4378,20 @@
     const activeOrders = orders.filter((order) => !order.deletedAt);
     const sorted = sortOrders(activeOrders);
     $("#stat-total").textContent = String(activeOrders.length);
-    $("#stat-open").textContent = String(activeOrders.filter((order) => order.status !== "Completed").length);
-    $("#stat-completed").textContent = String(activeOrders.filter((order) => order.status === "Completed").length);
+    $("#stat-pending").textContent = String(activeOrders.filter((order) => normalizeOrderStatus(order.status) === "Pending").length);
+    $("#stat-in-progress").textContent = String(activeOrders.filter((order) => normalizeOrderStatus(order.status) === "In progress").length);
+    $("#stat-delivered").textContent = String(activeOrders.filter((order) => normalizeOrderStatus(order.status) === "Delivered").length);
+    $("#stat-cancelled").textContent = String(activeOrders.filter((order) => normalizeOrderStatus(order.status) === "Cancelled").length);
+    $("#stat-low-stock").textContent = String(productCatalog.filter((item) => {
+      const stock = remainingStockValues(item);
+      return stock.length > 0 && Math.min(...stock) <= lowStockThreshold;
+    }).length);
     $("#nav-order-count").textContent = String(activeOrders.length);
     const target = $("#recent-orders");
     target.replaceChildren(...sorted.slice(0, 5).map(orderRow));
     labelTableRows(target);
     $("#recent-empty").hidden = sorted.length > 0;
+    renderNotifications();
   }
 
   function renderAllOrders() {
@@ -4236,7 +4399,7 @@
     const status = $("#status-filter").value;
     const date = $("#order-date-filter").value;
     const filtered = sortOrders(orders.filter((order) => !order.deletedAt)).filter((order) =>
-      (status === "all" || order.status === status) &&
+      (status === "all" || normalizeOrderStatus(order.status) === status) &&
       (!date || order.date === date) &&
       `${order.id} ${order.customer} ${order.transferId || ""} ${order.category}`.toLowerCase().includes(query)
     );
@@ -4259,13 +4422,40 @@
     $("#history-filter-label").textContent = selectedOrder
       ? `Showing ${selectedOrder.id} — ${selectedOrder.customer}${selectedOrder.deletedAt ? " (deleted)" : ""}`
       : "";
-    const entries = orders.filter((order) => !order.deletedAt).flatMap((order) => (order.history || []).map((entry) => ({
+    const orderEntries = orders.flatMap((order) => (order.history || []).map((entry) => ({
       ...entry,
       orderId: order.id,
       customer: order.customer,
       actor: entry.actor || normalizeCreatedBy(order.preparedBy) || "Unknown user",
-      deleted: false
-    }))).filter((entry) =>
+      deleted: Boolean(order.deletedAt)
+    })));
+    const returnEntries = returnedTiles.flatMap((entry) => {
+      const base = {
+        orderId: `Return ${entry.id}`,
+        customer: entry.returnedFrom || "—",
+        details: `${entry.product || "Product"} · ${formatCatalogNumber(entry.cartons)} cartons, ${formatCatalogNumber(entry.firi)} FIRI`,
+        deleted: false
+      };
+      if (Array.isArray(entry.history) && entry.history.length) {
+        return entry.history.map((activity) => ({
+          ...base,
+          ...activity,
+          actor: activity.actor || entry.recordedBy || "Unknown user"
+        }));
+      }
+      return [{
+        ...base,
+        timestamp: Number(entry.createdAt) || 0,
+        action: "Return created",
+        actor: entry.recordedBy || "Unknown user"
+      }, ...(entry.returnEditedAt ? [{
+        ...base,
+        timestamp: Number(entry.returnEditedAt),
+        action: "Return edited",
+        actor: entry.returnEditedBy || "Unknown user"
+      }] : [])];
+    });
+    const entries = [...orderEntries, ...returnEntries].filter((entry) =>
       (!historyOrderFilter || entry.orderId === historyOrderFilter)
       && `${entry.orderId} ${entry.customer} ${entry.action} ${entry.details}`.toLowerCase().includes(query)
     ).sort((a, b) => b.timestamp - a.timestamp);
@@ -4289,6 +4479,169 @@
     $("#order-history").replaceChildren(...rows);
     labelTableRows($("#order-history"));
     $("#history-empty").hidden = entries.length > 0;
+  }
+
+  function getNotificationEvents() {
+    return orders.filter((order) => !order.deletedAt).flatMap((order) =>
+      (order.history || []).flatMap((entry) => {
+        if (entry.action === "Order created" && order.driver) {
+          return [{ ...entry, orderId: order.id, customer: order.customer, message: `Order assigned to ${order.driver}` }];
+        }
+        if (entry.action === "Order updated") {
+          const assigned = /Changed:.*(?:Delivered by|Driver phone)/i.test(entry.details || "");
+          return [{
+            ...entry,
+            orderId: order.id,
+            customer: order.customer,
+            message: assigned ? `Order assigned to ${order.driver || "a driver"}` : "Order updated"
+          }];
+        }
+        if (entry.action === "Status changed") {
+          const nextStatus = String(entry.details || "").split("→").pop()?.trim();
+          return [{
+            ...entry,
+            orderId: order.id,
+            customer: order.customer,
+            message: nextStatus === "In progress" ? "Ready for delivery" : `Order status changed to ${nextStatus || "updated"}`
+          }];
+        }
+        return [];
+      })
+    ).sort((left, right) => Number(right.timestamp) - Number(left.timestamp));
+  }
+
+  function notificationStorageKey() {
+    return `shaafici-order-desk-notifications-read-${cloudUser?.id || "local"}`;
+  }
+
+  function renderNotifications() {
+    const events = getNotificationEvents();
+    const storedReadAt = localStorage.getItem(notificationStorageKey());
+    const readAt = storedReadAt == null ? Date.now() : Number(storedReadAt);
+    if (storedReadAt == null) localStorage.setItem(notificationStorageKey(), String(readAt));
+    const unreadCount = events.filter((entry) => Number(entry.timestamp) > readAt).length;
+    const badge = $("#nav-notification-count");
+    badge.textContent = String(unreadCount);
+    badge.hidden = unreadCount === 0;
+    const rows = events.map((entry) => {
+      const row = document.createElement("tr");
+      if (Number(entry.timestamp) > readAt) row.classList.add("notification-unread");
+      [
+        new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(entry.timestamp),
+        entry.message,
+        entry.orderId,
+        entry.customer || "—",
+        entry.actor || "Unknown user"
+      ].forEach((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      });
+      return row;
+    });
+    $("#notifications-list").replaceChildren(...rows);
+    $("#notifications-empty").hidden = events.length > 0;
+  }
+
+  function markNotificationsRead() {
+    localStorage.setItem(notificationStorageKey(), String(Date.now()));
+    renderNotifications();
+  }
+
+  let reportRows = [];
+  function renderReports() {
+    const from = $("#report-date-from").value;
+    const to = $("#report-date-to").value;
+    const productQuery = $("#report-product-filter").value.trim().toLocaleLowerCase();
+    const branchQuery = $("#report-branch-filter").value.trim().toLocaleLowerCase();
+    const matchesDate = (date) => (!from || date >= from) && (!to || date <= to);
+    const rows = [];
+    const orderIds = new Set();
+    const transferIds = new Set();
+    const returnIds = new Set();
+    let orderedQuantity = 0;
+    let returnedCartons = 0;
+    let returnedFiri = 0;
+
+    orders.filter((order) => !order.deletedAt && matchesDate(order.date || ""))
+      .forEach((order) => {
+        if (branchQuery && !String(order.branch || "").toLocaleLowerCase().includes(branchQuery)) return;
+        const matchingItems = (order.items || []).filter((item) =>
+          String(item.product || "").toLocaleLowerCase().includes(productQuery)
+        );
+        if (!matchingItems.length) return;
+        orderIds.add(order.id);
+        if (isWarehouseTransfer(order)) transferIds.add(order.id);
+        matchingItems.forEach((item) => {
+          const quantity = Number(item.ordered) || 0;
+          orderedQuantity += quantity;
+          rows.push({
+            type: isWarehouseTransfer(order) ? "Transfer" : "Order",
+            date: order.date || "",
+            reference: order.transferId || order.id,
+            branch: order.branch || "",
+            product: item.product || "",
+            quantity: formatCatalogNumber(quantity),
+            unit: "units"
+          });
+        });
+      });
+
+    returnedTiles.filter((entry) => matchesDate(entry.returnedDate || ""))
+      .filter((entry) => !branchQuery || String(entry.branch || "").toLocaleLowerCase().includes(branchQuery))
+      .filter((entry) => String(entry.product || "").toLocaleLowerCase().includes(productQuery))
+      .forEach((entry) => {
+        returnIds.add(entry.id);
+        returnedCartons += Number(entry.cartons) || 0;
+        returnedFiri += Number(entry.firi) || 0;
+        rows.push({
+          type: "Return",
+          date: entry.returnedDate || "",
+          reference: entry.id,
+          branch: entry.branch || "",
+          product: entry.product || "",
+          quantity: `${formatCatalogNumber(entry.cartons)} cartons; ${formatCatalogNumber(entry.firi)} FIRI`,
+          unit: "mixed"
+        });
+      });
+
+    reportRows = rows.sort((left, right) => right.date.localeCompare(left.date)
+      || left.reference.localeCompare(right.reference, undefined, { numeric: true }));
+    $("#report-order-count").textContent = String(orderIds.size);
+    $("#report-transfer-count").textContent = String(transferIds.size);
+    $("#report-return-count").textContent = String(returnIds.size);
+    $("#report-ordered-quantity").textContent = formatCatalogNumber(orderedQuantity);
+    $("#report-returned-quantity").textContent = `${formatCatalogNumber(returnedCartons)} / ${formatCatalogNumber(returnedFiri)}`;
+    const tableRows = reportRows.map((entry) => {
+      const row = document.createElement("tr");
+      [entry.type, entry.date, entry.reference, entry.branch || "—", entry.product || "—", entry.quantity, entry.unit]
+        .forEach((value) => {
+          const cell = document.createElement("td");
+          cell.textContent = value;
+          row.append(cell);
+        });
+      return row;
+    });
+    $("#report-rows").replaceChildren(...tableRows);
+    $("#reports-empty").hidden = reportRows.length > 0;
+  }
+
+  function exportReportCsv() {
+    if (!reportRows.length) {
+      showToast("There is no report data to export.");
+      return;
+    }
+    const columns = ["type", "date", "reference", "branch", "product", "quantity", "unit"];
+    const csv = [columns.join(","), ...reportRows.map((row) =>
+      columns.map((key) => `"${String(row[key] ?? "").replaceAll('"', '""')}"`).join(",")
+    )].join("\r\n");
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `shaafici-report-${dateValue()}.csv`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`${reportRows.length.toLocaleString("en")} report rows exported.`);
   }
 
   function renderTransferHistory() {
@@ -4378,18 +4731,13 @@
       return String(product || "").trim().toLocaleLowerCase()
         === itemHistoryProductFilter.trim().toLocaleLowerCase();
     };
-    const visibleDates = new Set([
-      dateValue(new Date()),
-      dateValue(new Date(Date.now() - 86400000))
-    ]);
     const orderEntries = orders
       .filter((order) => !order.deletedAt)
       .flatMap((order) => order.items.flatMap((item) => {
         const createdAt = Number(order.createdAt) || 0;
         const warehouseTransfer = isWarehouseTransfer(order);
         if (!matchesItemHistoryProduct(item.product)) return [];
-        if (!createdAt || !itemHistoryProductFilter && !warehouseTransfer
-          && !visibleDates.has(dateValue(new Date(createdAt)))) return [];
+        if (!createdAt) return [];
         const ordered = Number(item.ordered);
         if (!Number.isFinite(ordered) || ordered <= 0) return [];
         const catalogItem = getCatalogProduct(item.product);
@@ -4422,9 +4770,7 @@
         adjustmentDirection: entry.amount > 0 ? "added" : "subtracted"
       }));
     const returnedTileEntries = returnedTiles
-      .filter((entry) => matchesItemHistoryProduct(entry.product)
-        && (itemHistoryProductFilter
-          || visibleDates.has(entry.returnedDate || dateValue(new Date(entry.createdAt || 0)))))
+      .filter((entry) => matchesItemHistoryProduct(entry.product))
       .map((entry) => {
         const dateTime = /^\d{4}-\d{2}-\d{2}$/.test(entry.returnedDate || "")
           ? new Date(`${entry.returnedDate}T12:00:00`).getTime()
@@ -4801,9 +5147,9 @@
   async function changeStatus(id) {
     const order = orders.find((entry) => entry.id === id);
     if (!order || order.deletedAt) return;
-    const statuses = ["Open", "In progress", "Completed"];
-    const previousStatus = order.status;
-    const nextStatus = statuses[(statuses.indexOf(order.status) + 1) % statuses.length];
+    const statuses = ["Pending", "In progress", "Delivered", "Cancelled"];
+    const previousStatus = normalizeOrderStatus(order.status);
+    const nextStatus = statuses[(statuses.indexOf(previousStatus) + 1) % statuses.length];
     const updatedOrder = { ...order, status: nextStatus, history: [...order.history] };
     recordOrderHistory(updatedOrder, "Status changed", `${previousStatus} → ${nextStatus}.`);
     const index = orders.indexOf(order);
@@ -4822,7 +5168,7 @@
   async function deleteOrder(id) {
     const order = orders.find((entry) => entry.id === id);
     if (!order || order.deletedAt) return;
-    if (!window.confirm(`Delete order ${order.id} for ${order.customer}? Its catalog changes and history will be deleted.`)) return;
+    if (!window.confirm(`Delete order ${order.id} for ${order.customer}? Its catalog changes will be restored; its activity history will be retained.`)) return;
     const previousCatalog = productCatalog.map((item) => ({
       ...item,
       quantities: [...(item.quantities || [])],
@@ -4835,7 +5181,8 @@
     const catalogChanges = order.catalogTakenApplied
       ? applyOrderCatalogDelta(order, -1)
       : [];
-    const deletedOrder = { ...order, deletedAt: Date.now(), history: [] };
+    const deletedOrder = { ...order, deletedAt: Date.now(), history: [...order.history] };
+    recordOrderHistory(deletedOrder, "Order deleted", "Order deleted; activity history retained.");
     if (catalogChanges.length && cloudDeployment) {
       try {
         await saveCatalogToCloud(currentCatalogData());
@@ -4931,6 +5278,17 @@
     setView(link.dataset.view);
   }));
   $("#history-search").addEventListener("input", renderHistory);
+  $("#notifications-mark-read").addEventListener("click", markNotificationsRead);
+  ["report-date-from", "report-date-to", "report-product-filter", "report-branch-filter"]
+    .forEach((id) => $(`#${id}`).addEventListener("input", renderReports));
+  $("#report-clear-filters").addEventListener("click", () => {
+    $("#report-date-from").value = "";
+    $("#report-date-to").value = "";
+    $("#report-product-filter").value = "";
+    $("#report-branch-filter").value = "";
+    renderReports();
+  });
+  $("#export-report").addEventListener("click", exportReportCsv);
   $("#transfer-history-search").addEventListener("input", renderTransferHistory);
   $("#transfer-history-date").addEventListener("change", renderTransferHistory);
   $("#transfer-history-clear-date").addEventListener("click", () => {
@@ -4960,7 +5318,7 @@
   }));
   $("#upload-order-pdf").addEventListener("click", () => $("#order-pdf-file").click());
   $("#upload-order-pdf-form").addEventListener("click", () => $("#order-pdf-file").click());
-  $("#export-data").addEventListener("click", exportLocalBackup);
+  $("#export-data").addEventListener("click", exportWorkspaceBackup);
   $("#import-data").addEventListener("click", () => $("#data-backup-file").click());
   $("#data-backup-file").addEventListener("change", (event) => {
     const file = event.target.files[0];
@@ -5144,6 +5502,7 @@
   $("#status-filter").addEventListener("change", renderAllOrders);
   $("#order-date-filter").addEventListener("change", renderAllOrders);
   $("#catalog-search").addEventListener("input", renderProductCatalogTable);
+  $("#low-stock-form").addEventListener("submit", saveLowStockThreshold);
   $("#catalog-filter-apply").addEventListener("click", applyCatalogFilterPanel);
   $("#catalog-filter-cancel").addEventListener("click", cancelCatalogFilterPanel);
   $$("[data-catalog-filter-operator]").forEach((operator) => {
@@ -5179,8 +5538,8 @@
     renderAccountAvatar(cloudUser);
     $("#welcome-greeting").textContent = greetingForTime();
     $("#welcome-user").textContent = usernameForUser(cloudUser);
-    $("#export-data").hidden = cloudDeployment;
-    $("#import-data").hidden = !cloudDeployment;
+    $("#export-data").hidden = cloudDeployment && !["owner", "admin"].includes(cloudRole);
+    $("#import-data").hidden = !cloudDeployment || !["owner", "admin"].includes(cloudRole);
     $("#storage-description").textContent = cloudDeployment
       ? `Signed in as ${cloudUser?.email || "workspace member"}.`
       : "Your orders are saved on this device.";
@@ -5194,6 +5553,14 @@
     renderSavedDrivers();
     $("#order-date").value = dateValue();
     $("#return-date").value = dateValue();
+    if (!cloudDeployment) {
+      const savedThresholdValue = localStorage.getItem("shaafici-order-desk-low-stock-threshold");
+      const savedThreshold = Number(savedThresholdValue);
+      if (savedThresholdValue !== null && Number.isFinite(savedThreshold) && savedThreshold >= 0) {
+        lowStockThreshold = savedThreshold;
+      }
+    }
+    $("#low-stock-threshold").value = String(lowStockThreshold);
     renderReturnedTiles();
     if (!itemsBody.children.length) createItemRow();
     updateConverterVisibility();

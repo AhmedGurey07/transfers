@@ -12,7 +12,8 @@
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
-  <script src="app.js?v=202611101805" defer></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
+  <script src="app.js?v=202611110748" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -173,7 +174,7 @@
 
       <section class="view" id="returned-tiles-view" aria-labelledby="returned-tiles-title">
         <div class="page-heading">
-          <div><p class="eyebrow">BROKEN TILE RETURNS</p><h1 id="returned-tiles-title">Returned tiles</h1><p class="welcome-copy">Register returned broken tiles and review their history. These records do not change catalog stock.</p></div>
+          <div><p class="eyebrow">BROKEN TILE RETURNS</p><h1 id="returned-tiles-title">Returned tiles</h1><p class="welcome-copy">Register returned broken tiles or import Excel history from this device. Records are saved to the shared workspace and do not change catalog stock.</p></div>
           <div class="catalog-actions"><button class="button button-secondary" type="button" id="import-returned-tiles">Import Excel history</button><input id="returned-tiles-file" type="file" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" hidden></div>
         </div>
         <form class="panel returned-tile-form" id="returned-tile-form">

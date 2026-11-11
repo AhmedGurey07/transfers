@@ -937,6 +937,126 @@
     }
   }
 
+  function returnedTileWorkbookCellText(value) {
+    return value == null ? "" : String(value).trim();
+  }
+
+  function returnedTileWorkbookDate(value) {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return [
+        value.getFullYear(),
+        String(value.getMonth() + 1).padStart(2, "0"),
+        String(value.getDate()).padStart(2, "0")
+      ].join("-");
+    }
+    if (typeof value === "number" && value > 20000 && value < 100000) {
+      const date = window.XLSX.SSF.parse_date_code(value);
+      if (date) {
+        return [
+          date.y,
+          String(date.m).padStart(2, "0"),
+          String(date.d).padStart(2, "0")
+        ].join("-");
+      }
+    }
+    const text = returnedTileWorkbookCellText(value);
+    const match = text.match(/^(\d{1,2})\s*-\s*(\d{1,2})\s*-\s*(\d{4})$/);
+    if (!match) return text;
+    const [, dayText, monthText, yearText] = match;
+    const day = Number(dayText);
+    const month = Number(monthText);
+    const year = Number(yearText);
+    const date = new Date(year, month - 1, day);
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+      ? `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+      : text;
+  }
+
+  async function readReturnedTileWorkbook(file) {
+    if (!window.XLSX) throw new Error("The Excel reader did not load. Check your internet connection and reload the app.");
+    const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+    const worksheet = workbook.Sheets.SalesData || workbook.Sheets[workbook.SheetNames[0]];
+    if (!worksheet) throw new Error("The workbook does not contain a worksheet.");
+    const range = window.XLSX.utils.decode_range(worksheet["!ref"] || "A1:A1");
+    const rows = window.XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      raw: true,
+      defval: "",
+      blankrows: true
+    });
+    const aliases = {
+      sourceNo: ["NO"],
+      returnedFrom: ["RETURNED FROM"],
+      product: ["NAME OF THE TILE"],
+      branch: ["BRANCH"],
+      driver: ["DRIVER", "DELIVERED DRIVER", "RETURNED DRIVER"],
+      cartons: ["CARTOONS", "CARTONS", "CRT"],
+      firi: ["FIRI"],
+      deliveredDate: ["DELIVERED DATE"],
+      returnedDate: ["RETURNED DATE"],
+      returnedBy: ["DRIVER RETURNED", "RETURNED BY"],
+      recordedBy: ["TRAN.CREATER", "TRAN. CREATER", "TRAN.CREATOR", "TRAN. CREATOR", "CREATED BY"]
+    };
+    let columns = null;
+    let headerOffset = 0;
+    for (let rowIndex = 0; rowIndex < Math.min(rows.length, 21); rowIndex += 1) {
+      const headers = new Map(rows[rowIndex].map((value, index) => [
+        returnedTileWorkbookCellText(value).toLocaleUpperCase(),
+        index
+      ]).filter(([name]) => name));
+      const candidate = Object.fromEntries(Object.entries(aliases).map(([field, names]) => [
+        field,
+        names.map((name) => headers.get(name)).find((index) => index !== undefined)
+      ]));
+      if (candidate.returnedFrom !== undefined && candidate.product !== undefined) {
+        columns = candidate;
+        headerOffset = rowIndex;
+        break;
+      }
+    }
+    if (!columns) {
+      throw new Error("No returned-tile data table was found. Expected RETURNED FROM and NAME OF THE TILE columns.");
+    }
+    const cell = (row, field) => columns[field] === undefined
+      ? ""
+      : row[columns[field]];
+    const number = (value) => {
+      const parsed = typeof value === "number" ? value : Number(returnedTileWorkbookCellText(value));
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const records = [];
+    const ids = new Set();
+    for (let rowIndex = headerOffset + 1; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex];
+      const product = returnedTileWorkbookCellText(cell(row, "product"));
+      const returnedFrom = returnedTileWorkbookCellText(cell(row, "returnedFrom"));
+      if (!product || !returnedFrom) continue;
+      const sourceNo = returnedTileWorkbookCellText(cell(row, "sourceNo"))
+        || `row-${range.s.r + rowIndex + 1}`;
+      const id = `return-legacy-${sourceNo}`;
+      if (ids.has(id)) throw new Error(`The workbook contains duplicate return number "${sourceNo}".`);
+      ids.add(id);
+      records.push({
+        id,
+        sourceNo,
+        returnedFrom,
+        product,
+        branch: returnedTileWorkbookCellText(cell(row, "branch")),
+        driver: returnedTileWorkbookCellText(cell(row, "driver")),
+        cartons: number(cell(row, "cartons")),
+        firi: number(cell(row, "firi")),
+        deliveredDate: returnedTileWorkbookDate(cell(row, "deliveredDate")),
+        returnedDate: returnedTileWorkbookDate(cell(row, "returnedDate")),
+        returnedBy: returnedTileWorkbookCellText(cell(row, "returnedBy")),
+        recordedBy: returnedTileWorkbookCellText(cell(row, "recordedBy")),
+        createdAt: 0,
+        imported: true
+      });
+    }
+    if (!records.length) throw new Error("No returned-tile records were found in the worksheet.");
+    return records;
+  }
+
   async function importReturnedTiles(file) {
     const status = $("#returned-tiles-import-status");
     status.hidden = false;
@@ -945,30 +1065,14 @@
       if (!file) return;
       if (!cloudUser || !supabaseClient) throw new Error("Sign in before importing returned-tile history.");
       if (returnedTilesSetupError) throw new Error(returnedTilesSetupError);
-      const fileApp = location.protocol === "file:";
-      const localServer = fileApp || location.protocol === "http:"
-        && ["127.0.0.1", "localhost"].includes(location.hostname);
-      if (!localServer) {
-        throw new Error("Excel history import is available when you open the app with Start Order Desk.cmd.");
-      }
       if (file.size > 25 * 1024 * 1024) throw new Error("Choose a workbook smaller than 25 MB.");
       status.textContent = "Reading returned-tile history…";
-      const apiBase = fileApp ? "http://127.0.0.1:8765" : "";
-      const response = await fetch(`${apiBase}/api/import-returned-tiles`, {
-        method: "POST",
-        body: file,
-        cache: "no-store",
-        mode: fileApp ? "cors" : "same-origin"
-      });
-      const result = await response.json();
-      if (!response.ok || !result.ok) throw new Error(result.error || "Could not read the returned-tile workbook.");
-      if (!Array.isArray(result.returns) || result.returns.some((entry) =>
+      const workbookReturns = await readReturnedTileWorkbook(file);
+      if (!Array.isArray(workbookReturns) || workbookReturns.some((entry) =>
         !entry || typeof entry.product !== "string" || typeof entry.returnedFrom !== "string"
       )) {
         throw new Error("The workbook does not contain valid returned-tile rows.");
       }
-      const workbookReturns = result.returns
-        .filter((entry) => entry.product.trim() && entry.returnedFrom.trim());
       const existingById = new Map(returnedTiles.map((entry) => [entry.id, entry]));
       const imported = workbookReturns
         .filter((entry) => !existingById.has(entry.id))
@@ -994,14 +1098,21 @@
         ...returnedTiles.map((entry) => updatedById.get(entry.id) || entry),
         ...imported
       ];
+      let savedRows = 0;
       try {
-        const { error } = await supabaseClient.from("returned_tile_records").upsert(
-          [...recorderUpdates, ...imported].map((entry) => ({ id: entry.id, data: entry })),
-          { onConflict: "id" }
-        );
-        if (error) throw error;
+        const rows = [...recorderUpdates, ...imported].map((entry) => ({ id: entry.id, data: entry }));
+        for (let offset = 0; offset < rows.length; offset += 500) {
+          status.textContent = `Saving returned-tile history… ${Math.min(offset + 500, rows.length).toLocaleString("en")} of ${rows.length.toLocaleString("en")}`;
+          const { error } = await supabaseClient.from("returned_tile_records")
+            .upsert(rows.slice(offset, offset + 500), { onConflict: "id" });
+          if (error) throw error;
+          savedRows += Math.min(500, rows.length - offset);
+        }
       } catch (error) {
         returnedTiles = previousEntries;
+        if (savedRows) {
+          throw new Error(`Import paused after saving ${savedRows.toLocaleString("en")} records. Re-import the workbook to continue. ${error.message}`);
+        }
         throw error;
       }
       const messages = [];

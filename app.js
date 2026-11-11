@@ -653,6 +653,7 @@
       timestamp: Date.now(),
       product: updatedProduct.product,
       previousProduct: previous.product,
+      actor: usernameForUser(cloudUser),
       changes: changedFields
     } : null;
     if (editingCatalogIndex < 0) productCatalog.push(updatedProduct);
@@ -737,6 +738,9 @@
       date,
       product: item.product,
       amount: amount * direction,
+      previousQuantity: quantity,
+      updatedQuantity: nextQuantity,
+      actor: usernameForUser(cloudUser),
       reason,
       unit: item.unit || "—"
     };
@@ -4721,15 +4725,27 @@
 
   function renderItemHistory() {
     const query = $("#item-history-search").value.trim().toLowerCase();
-    const selectedCatalogProduct = itemHistoryProductFilter
-      ? getCatalogProduct(itemHistoryProductFilter)
+    const selectedCatalogProduct = getCatalogProduct(itemHistoryProductFilter || query);
+    const productFilter = itemHistoryProductFilter || (selectedCatalogProduct ? query : "");
+    const exactProductFilter = productFilter && !selectedCatalogProduct
+      ? productFilter
       : null;
     const matchesItemHistoryProduct = (product) => {
-      if (!itemHistoryProductFilter) return true;
+      if (!productFilter) return true;
       const catalogProduct = getCatalogProduct(product);
       if (selectedCatalogProduct && catalogProduct) return catalogProduct === selectedCatalogProduct;
+      if (!exactProductFilter) return true;
       return String(product || "").trim().toLocaleLowerCase()
-        === itemHistoryProductFilter.trim().toLocaleLowerCase();
+        === exactProductFilter.trim().toLocaleLowerCase();
+    };
+    const matchesSearch = (entry) => {
+      if (!query) return true;
+      if (`${entry.reference} ${entry.product} ${entry.previousProduct || ""} ${entry.from} ${entry.to} ${entry.reason || ""}`.toLowerCase().includes(query)) {
+        return true;
+      }
+      if (!selectedCatalogProduct) return false;
+      return [entry.product, entry.previousProduct]
+        .some((product) => product && getCatalogProduct(product) === selectedCatalogProduct);
     };
     const orderEntries = orders
       .filter((order) => !order.deletedAt)
@@ -4752,7 +4768,8 @@
           to: warehouseTransfer ? "WH2/Warehouse 200k" : order.branch || order.customer || "—",
           quantity: ordered,
           unit: catalogItem?.unit || item.unit || "—",
-          quantityHighlight: warehouseTransfer
+          quantityHighlight: warehouseTransfer,
+          changedBy: normalizeCreatedBy(order.preparedBy) || "—"
         }];
       }))
       ;
@@ -4761,12 +4778,17 @@
       .map((entry) => ({
         ...entry,
         timestamp: entry.timestamp,
-        reference: entry.reference || "Manual adjustment",
-        from: entry.amount > 0 ? "Manual adjustment" : "WH2/Warehouse 200k",
-        to: entry.amount > 0 ? "WH2/Warehouse 200k" : "Manual adjustment",
+        reference: entry.reference || (entry.amount > 0 ? "Direct quantity addition" : "Direct quantity reduction"),
+        from: entry.previousQuantity == null
+          ? entry.amount > 0 ? "Manual adjustment" : "WH2/Warehouse 200k"
+          : formatCatalogNumber(entry.previousQuantity),
+        to: entry.updatedQuantity == null
+          ? entry.amount > 0 ? "WH2/Warehouse 200k" : "Manual adjustment"
+          : formatCatalogNumber(entry.updatedQuantity),
         quantity: Math.abs(entry.amount),
         warehouseTransfer: false,
         quantityHighlight: true,
+        changedBy: entry.actor || "Unknown user",
         adjustmentDirection: entry.amount > 0 ? "added" : "subtracted"
       }));
     const returnedTileEntries = returnedTiles
@@ -4787,7 +4809,8 @@
           quantity,
           unit: "Returned",
           returnedTile: true,
-          recordedBy: entry.recordedBy
+          recordedBy: entry.recordedBy,
+          changedBy: entry.recordedBy || "—"
         };
         return receivedEntry;
       });
@@ -4802,12 +4825,15 @@
         reference: `Catalog edit: ${change.field}`,
         from: change.before || "—",
         to: change.after || "—",
-        quantity: "—",
+        quantity: change.field === "Quantity" || change.field === "Taken" || change.field === "R/QUANTITY"
+          ? `${change.before || "—"} → ${change.after || "—"}`
+          : "—",
         unit: "—",
-        catalogEdit: true
+        catalogEdit: true,
+        changedBy: entry.actor || "Unknown user"
       })));
     const entries = [...orderEntries, ...adjustmentEntries, ...returnedTileEntries, ...catalogEditEntries]
-      .filter((entry) => `${entry.reference} ${entry.product} ${entry.previousProduct || ""} ${entry.from} ${entry.to} ${entry.reason || ""}`.toLowerCase().includes(query))
+      .filter(matchesSearch)
       .sort((left, right) => right.timestamp - left.timestamp);
     const rows = entries.map((entry) => {
       const row = document.createElement("tr");
@@ -4836,7 +4862,8 @@
         entry.from,
         entry.to,
         formatCatalogNumber(entry.quantity),
-        entry.unit
+        entry.unit,
+        entry.changedBy || "—"
       ];
       const dateCell = document.createElement("td");
       dateCell.textContent = date;

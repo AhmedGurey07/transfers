@@ -58,7 +58,7 @@ Product Catalog highlights products whose numeric **R/QUANTITY** is at or below 
 
 **Notifications** are derived from saved order history: driver assignments, order edits, and orders moved to In progress (shown as ready for delivery). Realtime order refresh updates the notification list; unread counts are remembered per user and browser. These are in-app notifications, not email or browser push.
 
-**Reports** filter orders, transfers, and returned tiles by date range, product, and branch. Use **Export CSV** to download the currently filtered rows. The User activity log includes order history and return creation/edit records, with the recorded username.
+**Reports** filter orders, transfers, and returned tiles by date range, product, and branch. Use **Export CSV** to download the currently filtered rows. The User activity log includes order history and return creation/edit records, with the recorded username. Item History shows the date and time for each record, and direct catalog quantity additions, reductions, or edits include the before/after quantity and the signed-in user.
 
 Workspace owners and admins can export a version-2 JSON backup or restore one from Overview. Backups include orders, drivers, returned tiles, and catalog data/settings, but never Supabase accounts or passwords. Restore adds records that are missing online; matching existing orders, drivers, returns, and products are preserved. Saved shared catalog settings are restored. Keep downloaded backups in a secure location. Version-1 backups containing orders and drivers remain supported.
 

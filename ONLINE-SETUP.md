@@ -57,17 +57,17 @@ The Overview and All orders pages use **Pending**, **In progress**, **Delivered*
 
 Product Catalog highlights products whose numeric **R/QUANTITY** is at or below the shared low-stock threshold. The default is 10; enter another non-negative value and select **Save threshold** to store it with the shared catalog.
 
-**Notifications** are derived from saved order history: driver assignments, order edits, and orders moved to In progress (shown as ready for delivery). Realtime order refresh updates the notification list; unread counts are remembered per user and browser. These are in-app notifications, not email or browser push.
+**Notifications** are derived from saved order history: order creation, edits, and orders moved to In progress (shown as ready for delivery). Realtime order refresh updates the notification list; unread counts are remembered per user and browser. These are in-app notifications, not email or browser push.
 
 **Reports** filter orders, transfers, and returned tiles by date range, product, and branch. Use **Export CSV** to download the currently filtered rows. The User activity log includes order history and return creation/edit records, with the recorded username. Item History shows the date and time for each record, and direct catalog quantity additions, reductions, or edits include the before/after quantity and the signed-in user.
 
-**Assignments and order filters** let users assign a staff member and driver, open **My orders**, and filter by branch, driver, product, status, and a date range. **Overdue** uses calendar days: Pending orders are flagged after 2 days and In progress orders after 1 day. **Delivery confirmation** is required before an order can be marked Delivered; enter the recipient and arrival time, and optionally draw a signature. The signature is saved with the authenticated workspace order record.
+**Order filters** let users filter by branch, driver, product, status, and a date range. **Overdue** uses calendar days: Pending orders are flagged after 2 days and In progress orders after 1 day.
 
 **Stock reservations** shows the quantity reserved for Pending/In progress orders and the available catalog quantity. Set a product's optional **Reorder-to target** in the catalog to see a suggested quantity. **Approval requests** can be submitted while creating an order; staff stock adjustments are submitted as requests and do not change stock until an admin approves them. Workspace owners/admins review requests in **All orders**. Approved orders/adjustments update the catalog.
 
 **Scheduled report summaries** can be set to daily or weekly in Reports. The summary is generated in-app while the website is open, or the next time someone opens it after the selected interval; it is not an email or a server-side background job.
 
-For an existing Supabase project, rerun the complete `supabase-schema.sql` after publishing these workflow changes, then deploy the updated `manage-users` function and the new `manage-workflows` function. Until those backend changes are deployed, assignments and approval decisions will not work online.
+For an existing Supabase project, rerun the complete `supabase-schema.sql` after publishing these workflow changes, then deploy the new `manage-workflows` function. Until those backend changes are deployed, approval decisions will not work online.
 
 Workspace owners and admins can export a version-2 JSON backup or restore one from Overview. Backups include orders, drivers, returned tiles, and catalog data/settings, but never Supabase accounts or passwords. Restore adds records that are missing online; matching existing orders, drivers, returns, and products are preserved. Saved shared catalog settings are restored. Keep downloaded backups in a secure location. Version-1 backups containing orders and drivers remain supported.
 

@@ -7,13 +7,13 @@
   <link rel="manifest" href="manifest.webmanifest?v=20261109">
   <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=202611130001">
+  <link rel="stylesheet" href="styles.css?v=202611130002">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
-  <script src="app.js?v=202611130002" defer></script>
+  <script src="app.js?v=202611130006" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -138,7 +138,7 @@
 
       <section class="view" id="orders-view" aria-labelledby="orders-title">
         <div class="page-heading"><div><p class="eyebrow">YOUR BUSINESS RECORDS</p><h1 id="orders-title">All orders</h1><p class="welcome-copy">Review, update, and print your saved orders.</p></div><button class="button button-primary" type="button" data-action="new-order"><span class="button-plus">＋</span> Create new order</button></div>
-        <div class="filter-bar order-filters"><label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search customer, product, driver, or order" aria-label="Search orders"></label><label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="In progress">In progress</option><option value="Delivered">Delivered</option><option value="Cancelled">Cancelled</option></select></label><label class="filter-select"><span class="sr-only">Filter by branch</span><input id="order-branch-filter" type="search" placeholder="Branch"></label><label class="filter-select"><span class="sr-only">Filter by driver</span><input id="order-driver-filter" type="search" placeholder="Driver"></label><label class="filter-select"><span class="sr-only">Order date from</span><input id="order-date-from-filter" type="date"></label><label class="filter-select"><span class="sr-only">Order date to</span><input id="order-date-to-filter" type="date"></label><label class="filter-select"><span class="sr-only">Assigned to me</span><span><input id="my-orders-filter" type="checkbox"> My orders</span></label></div>
+        <div class="filter-bar order-filters"><label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search customer, product, driver, or order" aria-label="Search orders"></label><label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="In progress">In progress</option><option value="Delivered">Delivered</option><option value="Cancelled">Cancelled</option></select></label><label class="filter-select"><span class="sr-only">Filter by branch</span><input id="order-branch-filter" type="search" placeholder="Branch"></label><label class="filter-select"><span class="sr-only">Filter by driver</span><input id="order-driver-filter" type="search" placeholder="Driver"></label><label class="filter-select"><span class="sr-only">Order date from</span><input id="order-date-from-filter" type="date"></label><label class="filter-select"><span class="sr-only">Order date to</span><input id="order-date-to-filter" type="date"></label></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th data-order-sort="id">ORDER</th><th data-order-sort="customer">CUSTOMER</th><th data-order-sort="transferId">TRANSFER ID</th><th data-order-sort="date">DATE</th><th data-order-sort="status">STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="all-orders"></tbody></table></div><div class="empty-state" id="orders-empty"><span class="empty-icon">⌕</span><strong>No matching orders</strong><span>Try changing your search or create a new order.</span></div></div>
         <section class="panel approval-panel" id="approvals-panel">
           <div class="panel-heading"><div><h2>Approval requests</h2><p>Staff requests for orders and stock adjustments. Only workspace admins can approve or reject.</p></div></div>
@@ -227,7 +227,7 @@
       </section>
 
       <section class="view" id="notifications-view" aria-labelledby="notifications-title">
-        <div class="page-heading"><div><p class="eyebrow">WORKSPACE UPDATES</p><h1 id="notifications-title">Notifications</h1><p class="welcome-copy">Order assignments, updates, and orders marked in progress appear here.</p></div><button class="button button-secondary" type="button" id="notifications-mark-read">Mark all as read</button></div>
+        <div class="page-heading"><div><p class="eyebrow">WORKSPACE UPDATES</p><h1 id="notifications-title">Notifications</h1><p class="welcome-copy">Order creation, updates, and orders marked in progress appear here.</p></div><button class="button button-secondary" type="button" id="notifications-mark-read">Mark all as read</button></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th>WHEN</th><th>UPDATE</th><th>ORDER</th><th>CUSTOMER</th><th>USER</th></tr></thead><tbody id="notifications-list"></tbody></table></div><div class="empty-state" id="notifications-empty"><span class="empty-icon">♧</span><strong>No notifications</strong><span>Order updates will appear here.</span></div></div>
       </section>
 
@@ -359,23 +359,10 @@
                     <div class="drivers-manager-actions"><button class="button button-secondary" type="button" id="save-driver">Save driver</button><span id="drivers-status" role="status" aria-live="polite"></span></div>
                   </details>
                   <label class="field"><span>Created by</span><select name="preparedBy"><option value="Eng Ahmed Gurey">Eng Ahmed Gurey</option><option value="Hamze Ali">Hamze Ali</option></select></label>
-                  <label class="field"><span>Assigned staff member</span><select name="assignedUserId" id="order-assigned-user"><option value="">Unassigned</option></select></label>
-                  <label class="field"><span>Assigned driver</span><input name="assignedDriver" id="order-assigned-driver" list="saved-drivers" maxlength="80" placeholder="Choose a driver"></label>
                   <label class="field field-wide approval-request-field"><span><input name="requestApproval" id="order-request-approval" type="checkbox"> Request admin approval for this order</span></label>
                   <label class="field field-wide"><span>Notes</span><textarea name="notes" rows="2" maxlength="250" placeholder="Add delivery instructions or other details"></textarea></label>
                 </div>
               </article>
-              <article class="panel delivery-confirmation-panel" id="delivery-confirmation-panel" hidden>
-                <div class="panel-heading"><div><h2>Delivery confirmation</h2><p>Record the recipient and arrival details. A drawn signature is optional.</p></div></div>
-                <label class="field"><span><input id="delivery-mark-complete" type="checkbox"> Confirm this order as delivered</span></label>
-                <div class="field-grid">
-                  <label class="field"><span>Received by <i>*</i></span><input id="delivery-recipient" maxlength="120"></label>
-                  <label class="field"><span>Arrival date and time <i>*</i></span><input id="delivery-arrived-at" type="datetime-local"></label>
-                </div>
-                <label class="field signature-field"><span>Recipient signature (optional)</span><canvas id="delivery-signature" width="600" height="180" aria-label="Draw recipient signature"></canvas></label>
-                <button class="button button-quiet" id="clear-delivery-signature" type="button">Clear signature</button>
-              </article>
-
               <article class="panel converter-panel" id="converter-panel" hidden>
                 <div class="panel-heading"><div><span class="step-number">↔</span><div><h2>Area converter</h2><p>Enter square meters to calculate the matching product units.</p></div></div></div>
                 <div class="converter-controls">

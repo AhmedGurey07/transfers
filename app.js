@@ -116,7 +116,6 @@
   let cloudRole = "staff";
   let currentPreparedBy = "Eng Ahmed Gurey";
   let workspaceUsers = [];
-  let assignableUsers = [];
   let cloudChannel = null;
   let cloudActivationPromise = null;
   let cloudRefreshTimer = null;
@@ -134,7 +133,6 @@
   let editingReturnedTileId = "";
   let viewHistory = [];
   let orderFormSnapshot = "";
-  let signatureHasInk = false;
   function indexProductCatalog() {
     productsByName.clear();
     productsByPdfName.clear();
@@ -1968,32 +1966,6 @@
     return data;
   }
 
-  function renderAssignableUsers(selectedId = $("#order-assigned-user").value) {
-    const select = $("#order-assigned-user");
-    select.replaceChildren(new Option("Unassigned", ""));
-    assignableUsers.forEach((user) => {
-      const option = new Option(`${user.name || user.email || "Workspace user"} · ${user.role}`, user.id);
-      select.add(option);
-    });
-    select.value = assignableUsers.some((user) => user.id === selectedId) ? selectedId : "";
-  }
-
-  async function refreshAssignableUsers() {
-    if (!cloudDeployment || !cloudUser) {
-      assignableUsers = [];
-      renderAssignableUsers("");
-      return;
-    }
-    try {
-      const result = await invokeUserManagement({ action: "list-assignees" });
-      assignableUsers = result.users.filter((user) => user.active);
-      renderAssignableUsers();
-    } catch (error) {
-      console.error("Could not load assignment options.", error);
-      showToast(error.message || "Could not load workspace staff for assignments.");
-    }
-  }
-
   function formatUserDate(value) {
     if (!value) return "Never";
     const date = new Date(value);
@@ -2340,7 +2312,6 @@
     cloudRole = "staff";
     orders = [];
     drivers = [];
-    assignableUsers = [];
     catalogApprovals = [];
     scheduledReportFrequency = "off";
     showAuthGate("Sign in to load your shared online workspace.");
@@ -2429,9 +2400,6 @@
           transferId: order.transferId || "",
           date: order.date || "",
           driver: order.driver || "",
-          assignedDriver: order.assignedDriver || "",
-          assignedUserId: order.assignedUserId || "",
-          assignedUserName: order.assignedUserName || "",
           driverPhone: order.driverPhone || "",
           preparedBy: order.preparedBy || "",
           notes: order.notes || "",
@@ -2443,9 +2411,6 @@
           approvalRequestedAt: Number(order.approvalRequestedAt) || 0,
           approvalDecidedBy: order.approvalDecidedBy || "",
           approvalDecidedAt: Number(order.approvalDecidedAt) || 0,
-          receivedBy: order.receivedBy || "",
-          arrivedAt: order.arrivedAt || "",
-          deliverySignature: typeof order.deliverySignature === "string" ? order.deliverySignature : "",
           deletedAt: Number(order.deletedAt) || 0,
           catalogTakenApplied: Boolean(order.catalogTakenApplied),
           history,
@@ -4044,9 +4009,9 @@
     return true;
 
     const order = printPreviewOrder;
-    const width = 302;
-    const scale = 2;
-    const padding = 12;
+    const width = 282;
+    const scale = 1;
+    const padding = 4;
     const contentWidth = width - padding * 2;
     const measurementCanvas = document.createElement("canvas");
     const measure = measurementCanvas.getContext("2d");
@@ -4274,21 +4239,27 @@
         .filter((pair) => Number(pair.quantity) > 0)
         .map((pair) => `${pair.quantity} ${pair.unit}`)
         .join(" · ") || "No quantity";
+      const tile = isTileProduct(item.product);
+      const quantityLines = wrap(quantities, "600 11px Arial", tile ? 82 : 58);
       return {
         index: index + 1,
+        tile,
         productLines,
         orderedLines,
-        quantityLines: wrap(quantities, "600 11px Arial", 58),
-        height: Math.max(productLines.length * 17 + orderedLines.length * 13, quantities.length ? 17 : 0) + 14
+        quantityLines,
+        height: tile
+          ? productLines.length * 17 + orderedLines.length * 13 + quantityLines.length * 15 + 18
+          : Math.max(productLines.length * 17 + orderedLines.length * 13, quantities.length ? 17 : 0) + 14
       };
     });
 
     let height = 16;
-    fieldRows.forEach((row) => { height += row.height + 7; });
+    fieldRows.forEach((row) => { height += Math.max(row.height, 45) + 18; });
     height += 6 + 26;
     itemRows.forEach((row) => { height += row.height; });
     if (order.notes) height += 10 + wrap(`Notes: ${order.notes}`, "11px Arial", contentWidth).length * 15;
     if (order.preparedBy) height += 20 + 11 + 4 + wrap(order.preparedBy, "600 11px Arial", contentWidth).length * 14;
+    height += 8;
     if (height * scale > 32767) throw new Error("This receipt is too long to capture as one image.");
 
     canvas.width = width * scale;
@@ -4299,7 +4270,7 @@
     context.fillStyle = "#fff";
     context.fillRect(0, 0, width, height);
     context.textBaseline = "top";
-    let y = 16;
+    let y = 12;
 
     fieldRows.forEach((row) => {
       row.fields.forEach((field, index) => {
@@ -4314,7 +4285,7 @@
           context.fillText(line, x + columnWidth / 2, y + 14 + lineIndex * 15);
         });
       });
-      y += row.height + 7;
+      y += Math.max(row.height, 45) + 18;
     });
 
     context.fillStyle = "#f0f0f0";
@@ -4335,14 +4306,28 @@
       context.fillText(String(row.index), padding + 11, rowTop + 8);
       context.textAlign = "left";
       context.font = "600 13px Arial";
-      row.productLines.forEach((line, index) => context.fillText(line, padding + 24, rowTop + 8 + index * 17));
-      context.fillStyle = "#333";
-      context.font = "9px Arial";
-      row.orderedLines.forEach((line, index) => context.fillText(line, padding + 24, rowTop + 8 + row.productLines.length * 17 + index * 13));
-      context.fillStyle = "#111";
-      context.font = "600 11px Arial";
-      context.textAlign = "right";
-      row.quantityLines.forEach((line, index) => context.fillText(line, width - padding - 4, rowTop + 8 + index * 15));
+      if (row.tile) {
+        let itemY = rowTop + 8;
+        context.textAlign = "center";
+        row.productLines.forEach((line, index) => context.fillText(line, width / 2, itemY + index * 17));
+        itemY += row.productLines.length * 17;
+        context.fillStyle = "#333";
+        context.font = "9px Arial";
+        row.orderedLines.forEach((line, index) => context.fillText(line, width / 2, itemY + index * 13));
+        itemY += row.orderedLines.length * 13;
+        context.fillStyle = "#111";
+        context.font = "600 11px Arial";
+        row.quantityLines.forEach((line, index) => context.fillText(line, width / 2, itemY + 5 + index * 15));
+      } else {
+        row.productLines.forEach((line, index) => context.fillText(line, padding + 24, rowTop + 8 + index * 17));
+        context.fillStyle = "#333";
+        context.font = "9px Arial";
+        row.orderedLines.forEach((line, index) => context.fillText(line, padding + 24, rowTop + 8 + row.productLines.length * 17 + index * 13));
+        context.fillStyle = "#111";
+        context.font = "600 11px Arial";
+        context.textAlign = "right";
+        row.quantityLines.forEach((line, index) => context.fillText(line, width - padding - 4, rowTop + 8 + index * 15));
+      }
       context.fillStyle = "#777";
       context.fillRect(padding, rowTop + row.height - 1, contentWidth, 1);
       y += row.height;
@@ -4359,6 +4344,9 @@
     if (order.preparedBy) {
       y += order.notes ? 20 : 10;
       context.fillStyle = "#777";
+      context.fillRect(padding, y, contentWidth, 1);
+      y += 12;
+      context.fillStyle = "#777";
       context.font = "700 8px Arial";
       context.textAlign = "right";
       context.fillText("CREATED BY", width - padding, y);
@@ -4373,86 +4361,6 @@
     });
     await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
     return true;
-  }
-
-  async function takeReceiptScreenshotPreview() {
-    if (!printPreviewOrder) throw new Error("There is no order to capture.");
-    if (!navigator.clipboard?.write || typeof ClipboardItem !== "function") {
-      throw new Error("Image clipboard access is unavailable. Allow clipboard access in Firefox, then try again.");
-    }
-    const source = $(".print-sheet");
-    if (!source) throw new Error("The print preview is not available.");
-    await document.fonts?.ready;
-    const bounds = source.getBoundingClientRect();
-    const width = Math.ceil(bounds.width);
-    const height = Math.ceil(source.scrollHeight);
-    const clone = source.cloneNode(true);
-    clone.querySelector("#take-receipt-screenshot")?.remove();
-    const copyStyles = (original, copy) => {
-      const computed = getComputedStyle(original);
-      for (const property of computed) {
-        copy.style.setProperty(property, computed.getPropertyValue(property));
-      }
-      [...original.children].forEach((child, index) => {
-        if (copy.children[index]) copyStyles(child, copy.children[index]);
-      });
-    };
-    copyStyles(source, clone);
-    clone.style.width = `${width}px`;
-    clone.style.height = `${height}px`;
-    clone.style.minHeight = "0";
-    clone.style.margin = "0";
-    clone.style.boxShadow = "none";
-    for (const image of clone.querySelectorAll("img")) {
-      const original = source.querySelector(`img[src="${image.getAttribute("src")}"]`);
-      if (!original?.complete || !original.naturalWidth) {
-        image.remove();
-        continue;
-      }
-      try {
-        const response = await fetch(new URL(original.getAttribute("src"), document.baseURI));
-        if (!response.ok) throw new Error(`Image request failed with status ${response.status}.`);
-        const blob = await response.blob();
-        image.src = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = () => reject(new Error("Could not read the preview logo."));
-          reader.readAsDataURL(blob);
-        });
-      } catch (error) {
-        console.warn("Could not embed the preview logo; omitting it from the screenshot.", error);
-        image.remove();
-      }
-    }
-    const serialized = new XMLSerializer().serializeToString(clone);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xhtml="http://www.w3.org/1999/xhtml" width="${width}" height="${height}"><foreignObject width="100%" height="100%"><xhtml:div xmlns="http://www.w3.org/1999/xhtml">${serialized}</xhtml:div></foreignObject></svg>`;
-    const svgUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
-    try {
-      const image = new Image();
-      image.src = svgUrl;
-      await new Promise((resolve, reject) => {
-        image.onload = resolve;
-        image.onerror = () => reject(new Error("Could not render the print preview screenshot."));
-      });
-      const scale = Math.min(10, Math.max(2, 3200 / width));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.ceil(width * scale);
-      canvas.height = Math.ceil(height * scale);
-      if (canvas.width > 32767 || canvas.height > 32767) {
-        throw new Error("This receipt is too long to capture at high resolution.");
-      }
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("Could not create the screenshot image.");
-      context.imageSmoothingEnabled = true;
-      context.imageSmoothingQuality = "high";
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      const png = new Promise((resolve, reject) => {
-        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not encode the screenshot image.")), "image/png");
-      });
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
-    } finally {
-      URL.revokeObjectURL(svgUrl);
-    }
   }
 
   function printOrderNow() {
@@ -4479,76 +4387,8 @@
     }
   }
 
-  function clearDeliverySignature() {
-    const canvas = $("#delivery-signature");
-    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
-    signatureHasInk = false;
-  }
-
-  function readDeliverySignature() {
-    return signatureHasInk ? $("#delivery-signature").toDataURL("image/png") : "";
-  }
-
-  function drawSavedSignature(signature) {
-    clearDeliverySignature();
-    if (typeof signature !== "string" || !signature.startsWith("data:image/png;base64,")
-      || signature.length > 200000) return;
-    const image = new Image();
-    image.onload = () => {
-      const canvas = $("#delivery-signature");
-      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-      signatureHasInk = true;
-      if (editingId) orderFormSnapshot = currentOrderFormSnapshot();
-    };
-    image.onerror = () => {
-      console.error("Could not display the saved delivery signature.");
-      showToast("The saved delivery signature could not be displayed.");
-    };
-    image.src = signature;
-  }
-
-  function configureDeliverySignature() {
-    const canvas = $("#delivery-signature");
-    const context = canvas.getContext("2d");
-    context.lineWidth = 3;
-    context.lineCap = "round";
-    context.lineJoin = "round";
-    canvas.addEventListener("pointerdown", (event) => {
-      if ($("#delivery-confirmation-panel").hidden) return;
-      const bounds = canvas.getBoundingClientRect();
-      const x = (event.clientX - bounds.left) * canvas.width / bounds.width;
-      const y = (event.clientY - bounds.top) * canvas.height / bounds.height;
-      canvas.setPointerCapture(event.pointerId);
-      context.beginPath();
-      context.moveTo(x, y);
-      canvas.dataset.drawing = "true";
-    });
-    canvas.addEventListener("pointermove", (event) => {
-      if (canvas.dataset.drawing !== "true") return;
-      const bounds = canvas.getBoundingClientRect();
-      const x = (event.clientX - bounds.left) * canvas.width / bounds.width;
-      const y = (event.clientY - bounds.top) * canvas.height / bounds.height;
-      context.lineTo(x, y);
-      context.stroke();
-      signatureHasInk = true;
-    });
-    const stopDrawing = () => { delete canvas.dataset.drawing; };
-    canvas.addEventListener("pointerup", stopDrawing);
-    canvas.addEventListener("pointercancel", stopDrawing);
-    $("#clear-delivery-signature").addEventListener("click", clearDeliverySignature);
-  }
-
-  function updateDeliveryConfirmationFields(showPanel = $("#delivery-mark-complete").checked) {
-    const confirmed = $("#delivery-mark-complete").checked;
-    $("#delivery-confirmation-panel").hidden = !showPanel;
-    $("#delivery-recipient").required = confirmed;
-    $("#delivery-arrived-at").required = confirmed;
-  }
-
   function readForm() {
     const data = new FormData(form);
-    const assignedUserId = data.get("assignedUserId");
-    const assignedUser = assignableUsers.find((user) => user.id === assignedUserId);
     const previousOrder = orders.find((order) => order.id === editingId);
     return {
       id: editingId || nextOrderId(),
@@ -4558,15 +4398,10 @@
       transferId: data.get("transferId").trim(),
       date: data.get("date"),
       driver: data.get("driver").trim(),
-      assignedDriver: data.get("assignedDriver").trim(),
-      assignedUserId: String(assignedUserId || ""),
-      assignedUserName: assignedUser?.name || assignedUser?.email || previousOrder?.assignedUserName || "",
       driverPhone: data.get("driverPhone").trim(),
       preparedBy: data.get("preparedBy").trim(),
       notes: data.get("notes").trim(),
-      status: $("#delivery-mark-complete").checked
-        ? "Delivered"
-        : editingId ? normalizeOrderStatus(previousOrder?.status) : "Pending",
+      status: editingId ? normalizeOrderStatus(previousOrder?.status) : "Pending",
       approvalStatus: $("#order-request-approval").checked && previousOrder?.approvalStatus !== "approved"
         ? "pending" : previousOrder?.approvalStatus || "",
       approvalRequestedBy: $("#order-request-approval").checked && previousOrder?.approvalStatus !== "approved"
@@ -4584,9 +4419,6 @@
           ? previousOrder.approvalRequestedAt || Date.now()
           : Date.now()
         : previousOrder?.approvalRequestedAt || 0,
-      receivedBy: $("#delivery-recipient").value.trim(),
-      arrivedAt: $("#delivery-arrived-at").value,
-      deliverySignature: readDeliverySignature(),
       items: getItems(),
       createdAt: editingId ? previousOrder?.createdAt || Date.now() : Date.now()
     };
@@ -4601,16 +4433,10 @@
       transferId: data.get("transferId"),
       date: data.get("date"),
       driver: data.get("driver"),
-      assignedDriver: data.get("assignedDriver"),
-      assignedUserId: data.get("assignedUserId"),
       driverPhone: data.get("driverPhone"),
       preparedBy: data.get("preparedBy"),
       notes: data.get("notes"),
       requestApproval: $("#order-request-approval").checked,
-      deliveryComplete: $("#delivery-mark-complete").checked,
-      receivedBy: $("#delivery-recipient").value,
-      arrivedAt: $("#delivery-arrived-at").value,
-      deliverySignature: readDeliverySignature(),
       items: getItems()
     });
   }
@@ -4645,7 +4471,7 @@
     row.setAttribute("aria-label", `Open order ${order.id}`);
     row.innerHTML = `
       <td><span class="order-number">${escapeAttribute(order.id)}</span></td>
-      <td class="customer-cell">${escapeAttribute(order.customer)}${order.assignedUserName || order.assignedDriver ? `<small class="order-assignment">${escapeAttribute([order.assignedUserName, order.assignedDriver].filter(Boolean).join(" · "))}</small>` : ""}${overdue ? '<small class="overdue-label">OVERDUE</small>' : ""}</td>
+      <td class="customer-cell">${escapeAttribute(order.customer)}${overdue ? '<small class="overdue-label">OVERDUE</small>' : ""}</td>
       <td>${escapeAttribute(order.transferId || "—")}</td>
       <td>${formatDate(order.date)}</td>
       <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button>${order.approvalStatus === "pending" ? '<small class="approval-state">Awaiting approval</small>' : ""}</td>
@@ -4800,15 +4626,13 @@
     const driver = $("#order-driver-filter").value.trim().toLocaleLowerCase();
     const from = $("#order-date-from-filter").value;
     const to = $("#order-date-to-filter").value;
-    const myOrders = $("#my-orders-filter").checked;
     const filtered = sortOrders(orders.filter((order) => !order.deletedAt)).filter((order) =>
       (status === "all" || normalizeOrderStatus(order.status) === status) &&
       (!from || (order.date || "") >= from) &&
       (!to || (order.date || "") <= to) &&
       (!branch || String(order.branch || "").toLocaleLowerCase().includes(branch)) &&
-      (!driver || `${order.driver || ""} ${order.assignedDriver || ""}`.toLocaleLowerCase().includes(driver)) &&
-      (!myOrders || order.assignedUserId === cloudUser?.id) &&
-      `${order.id} ${order.customer} ${order.transferId || ""} ${order.category} ${order.branch || ""} ${order.driver || ""} ${order.assignedDriver || ""} ${(order.items || []).map((item) => item.product).join(" ")}`.toLocaleLowerCase().includes(query)
+      (!driver || String(order.driver || "").toLocaleLowerCase().includes(driver)) &&
+      `${order.id} ${order.customer} ${order.transferId || ""} ${order.category} ${order.branch || ""} ${order.driver || ""} ${(order.items || []).map((item) => item.product).join(" ")}`.toLocaleLowerCase().includes(query)
     );
     const target = $("#all-orders");
     target.replaceChildren(...filtered.map(orderRow));
@@ -4892,18 +4716,15 @@
   function getNotificationEvents() {
     const orderEvents = orders.filter((order) => !order.deletedAt).flatMap((order) =>
       (order.history || []).flatMap((entry) => {
-        if (entry.action === "Order created" && order.driver) {
-          return [{ ...entry, orderId: order.id, customer: order.customer, message: `Order assigned to ${order.driver}` }];
+        if (entry.action === "Order created") {
+          return [{ ...entry, orderId: order.id, customer: order.customer, message: "Order created" }];
         }
         if (entry.action === "Order updated") {
-          const assigned = /Changed:.*(?:Delivered by|Assigned driver|Assigned staff member|Driver phone)/i.test(entry.details || "");
           return [{
             ...entry,
             orderId: order.id,
             customer: order.customer,
-            message: assigned
-              ? `Order assigned to ${[order.assignedUserName, order.assignedDriver || order.driver].filter(Boolean).join(" and ") || "a staff member"}`
-              : "Order updated"
+            message: "Order updated"
           }];
         }
         if (entry.action === "Status changed") {
@@ -5480,13 +5301,7 @@
   function resetForm() {
     form.reset();
     editingId = null;
-    renderAssignableUsers("");
     $("#order-request-approval").disabled = false;
-    $("#delivery-mark-complete").checked = false;
-    updateDeliveryConfirmationFields(false);
-    $("#delivery-recipient").value = "";
-    $("#delivery-arrived-at").value = "";
-    clearDeliverySignature();
     converterPinnedOpen = false;
     form.elements.preparedBy.value = currentPreparedBy;
     $("#order-date").value = dateValue();
@@ -5541,18 +5356,11 @@
     form.elements.transferId.value = order.transferId || "";
     form.elements.date.value = order.date;
     form.elements.driver.value = order.driver || "";
-    form.elements.assignedDriver.value = order.assignedDriver || "";
-    renderAssignableUsers(order.assignedUserId || "");
     $("#order-request-approval").checked = order.approvalStatus === "pending";
     $("#order-request-approval").disabled = order.approvalStatus === "approved";
     form.elements.driverPhone.value = order.driverPhone || "";
     form.elements.preparedBy.value = normalizeCreatedBy(order.preparedBy);
     form.elements.notes.value = order.notes || "";
-    $("#delivery-recipient").value = order.receivedBy || "";
-    $("#delivery-arrived-at").value = order.arrivedAt || "";
-    drawSavedSignature(order.deliverySignature || "");
-    $("#delivery-mark-complete").checked = normalizeOrderStatus(order.status) === "Delivered";
-    updateDeliveryConfirmationFields($("#delivery-mark-complete").checked);
     itemsBody.replaceChildren();
     (order.items.length ? order.items : [{}]).forEach(createItemRow);
     updateConverterVisibility();
@@ -5585,15 +5393,10 @@
       ["Order date", "date"],
       ["Status", "status"],
       ["Delivered by", "driver"],
-      ["Assigned driver", "assignedDriver"],
-      ["Assigned staff member", "assignedUserName"],
       ["Driver phone", "driverPhone"],
       ["Created by", "preparedBy"],
       ["Notes", "notes"],
       ["Approval request", "approvalStatus"],
-      ["Delivery recipient", "receivedBy"],
-      ["Arrival time", "arrivedAt"],
-      ["Delivery signature", "deliverySignature"],
       ["Items", "items"]
     ];
     return fields.filter(([, key]) => JSON.stringify(previous[key] ?? "") !== JSON.stringify(next[key] ?? ""))
@@ -5714,12 +5517,6 @@
     const statuses = ["Pending", "In progress", "Delivered", "Cancelled"];
     const previousStatus = normalizeOrderStatus(order.status);
     const nextStatus = statuses[(statuses.indexOf(previousStatus) + 1) % statuses.length];
-    if (nextStatus === "Delivered") {
-      editOrder(id);
-      $("#delivery-confirmation-panel").hidden = false;
-      showToast("Enter the recipient and arrival time, then confirm delivery and save.");
-      return;
-    }
     const previousCatalog = productCatalog.map((item) => ({
       ...item,
       quantities: [...(item.quantities || [])],
@@ -6074,7 +5871,7 @@
   $("#preview-full-page").addEventListener("click", () => setPrintLayout("full-page"));
   $("#take-receipt-screenshot").addEventListener("click", () => {
     takeReceiptScreenshot()
-      .then(() => showToast("Receipt copied. Paste it into your PDF with Ctrl+V."))
+      .then(() => showToast("Screenshot copied. Paste it into your PDF with Ctrl+V."))
       .catch((error) => {
         console.error("Could not take the receipt screenshot.", error);
         showToast(error.name === "NotAllowedError"
@@ -6120,13 +5917,11 @@
   });
   ["order-search", "order-branch-filter", "order-driver-filter", "order-date-from-filter", "order-date-to-filter"]
     .forEach((id) => $(`#${id}`).addEventListener("input", renderAllOrders));
-  ["status-filter", "order-date-from-filter", "order-date-to-filter", "my-orders-filter"]
+  ["status-filter", "order-date-from-filter", "order-date-to-filter"]
     .forEach((id) => $(`#${id}`).addEventListener("change", renderAllOrders));
   $("#catalog-search").addEventListener("input", renderProductCatalogTable);
   $("#low-stock-form").addEventListener("submit", saveLowStockThreshold);
   $("#scheduled-report-form").addEventListener("submit", saveScheduledReport);
-  $("#delivery-mark-complete").addEventListener("change", () => updateDeliveryConfirmationFields());
-  configureDeliverySignature();
   $("#catalog-filter-apply").addEventListener("click", applyCatalogFilterPanel);
   $("#catalog-filter-cancel").addEventListener("click", cancelCatalogFilterPanel);
   $$("[data-catalog-filter-operator]").forEach((operator) => {
@@ -6164,8 +5959,6 @@
     $("#upload-workbook").hidden = cloudDeployment && cloudRole === "staff";
     $("#order-request-approval").closest(".field").hidden = !cloudDeployment;
     $("#approvals-panel").hidden = !cloudDeployment;
-    $("#order-assigned-user").closest(".field").hidden = !cloudDeployment;
-    $("#my-orders-filter").closest("label").hidden = !cloudDeployment;
     $("#account-avatar").hidden = !cloudDeployment;
     renderAccountAvatar(cloudUser);
     $("#welcome-greeting").textContent = greetingForTime();
@@ -6182,7 +5975,6 @@
       year: "numeric"
     }).format(new Date());
     renderProductCatalogOptions();
-    refreshAssignableUsers();
     if (!cloudDeployment) {
       scheduledReportFrequency = localStorage.getItem("shaafici-order-desk-scheduled-report-frequency") || "off";
     }

@@ -840,15 +840,11 @@ form .auth-field input::placeholder {
 .order-overdue-row { background: #fff7f5; }
 .overdue-label, .approval-state { display: block; margin-top: 4px; color: #a53e35; font-size: 9px; font-weight: 700; }
 .approval-state { color: #a56a13; }
-.order-assignment { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
 .approval-panel { margin-top: 18px; }
 .approval-request-field span { display: flex; align-items: center; gap: 7px; }
 .scheduled-report-settings { display: flex; align-items: end; gap: 12px; margin-bottom: 18px; }
 .scheduled-report-settings .panel-heading { flex: 1 1 100%; margin: 0; }
 .scheduled-report-settings .field { width: min(100%, 220px); margin: 0; }
-.signature-field { margin: 14px 0 8px; }
-.signature-field canvas { display: block; width: 100%; height: 140px; border: 1px solid var(--line); border-radius: 8px; background: #fff; touch-action: none; }
-.delivery-confirmation-panel .field > span input[type="checkbox"] { margin-right: 6px; }
 .notification-unread { background: #eef7ef; font-weight: 600; }
 .nav-count:not([hidden]) { color: #fff; background: #bc594a; }
 

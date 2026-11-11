@@ -7,12 +7,12 @@
   <link rel="manifest" href="manifest.webmanifest?v=20261109">
   <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=202611101740">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
-  <script src="app.js?v=202611101003" defer></script>
+  <script src="app.js?v=202611101805" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -69,6 +69,7 @@
         <a class="nav-link" href="#history" data-view="history"><span class="nav-icon">◷</span> Order history</a>
         <a class="nav-link" href="#transfer-history" data-view="transfer-history"><span class="nav-icon">↔</span> Transfer history</a>
         <a class="nav-link" href="#item-history" data-view="item-history"><span class="nav-icon">▤</span> Item history</a>
+        <a class="nav-link" href="#returned-tiles" data-view="returned-tiles"><span class="nav-icon">↩</span> Returned tiles</a>
         <a class="nav-link" href="#new-order" data-view="new-order"><span class="nav-icon">＋</span> Create an order</a>
         <a class="nav-link" href="#catalog" data-view="catalog"><span class="nav-icon">▦</span> Product catalog</a>
         <a class="nav-link" href="#users" data-view="users" id="users-nav-link" hidden><span class="nav-icon">♙</span> Users</a>
@@ -170,6 +171,31 @@
         <div class="table-card"><div class="table-scroll"><table class="catalog-table"><thead><tr id="catalog-headings"></tr></thead><tbody id="catalog-products"></tbody></table></div><div class="empty-state" id="catalog-empty" hidden><span class="empty-icon">⌕</span><strong>No matching products</strong><span>Try a different product name, code, quantity, or unit.</span></div></div>
       </section>
 
+      <section class="view" id="returned-tiles-view" aria-labelledby="returned-tiles-title">
+        <div class="page-heading">
+          <div><p class="eyebrow">BROKEN TILE RETURNS</p><h1 id="returned-tiles-title">Returned tiles</h1><p class="welcome-copy">Register returned broken tiles and review their history. These records do not change catalog stock.</p></div>
+          <div class="catalog-actions"><button class="button button-secondary" type="button" id="import-returned-tiles">Import Excel history</button><input id="returned-tiles-file" type="file" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" hidden></div>
+        </div>
+        <form class="panel returned-tile-form" id="returned-tile-form">
+          <div class="panel-heading"><div><h2 id="returned-tile-form-title">Register a returned tile</h2><p>Click a saved return row to load it here and make changes. Returned cartons and FIRI are recorded for history only.</p></div></div>
+          <div class="field-grid">
+            <label class="field"><span>Returned from <i>*</i></span><input id="return-customer" maxlength="160" required></label>
+            <label class="field"><span>Tile / product <i>*</i></span><input id="return-product" list="product-catalog" maxlength="200" required></label>
+            <label class="field"><span>Branch</span><input id="return-branch" maxlength="80"></label>
+            <label class="field"><span>Original driver</span><input id="return-driver" maxlength="120"></label>
+            <label class="field"><span>Cartons</span><input id="return-cartons" type="number" min="0" step="any" value="0" required></label>
+            <label class="field"><span>FIRI</span><input id="return-firi" type="number" min="0" step="any" value="0" required></label>
+            <label class="field"><span>Original delivery date</span><input id="return-delivered-date" type="date"></label>
+            <label class="field"><span>Returned date <i>*</i></span><input id="return-date" type="date" required></label>
+            <label class="field"><span>Returned by</span><input id="return-returned-by" maxlength="120"></label>
+          </div>
+          <div class="form-actions"><span class="auth-status" id="returned-tile-status" role="status" aria-live="polite"></span><div><button class="button button-quiet" id="cancel-returned-tile-edit" type="button" hidden>Cancel edit</button><button class="button button-primary" id="save-returned-tile" type="submit">Save return</button></div></div>
+        </form>
+        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="returned-tiles-search" type="search" placeholder="Search customer, product, branch, or driver" aria-label="Search returned tiles"></label><span class="item-count"><span id="returned-tiles-count">0</span> returns</span></div>
+        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>NO</th><th>RETURNED FROM</th><th>PRODUCT</th><th>BRANCH</th><th>ORIGINAL DRIVER</th><th>CARTONS</th><th>FIRI</th><th>DELIVERED DATE</th><th>RETURNED DATE</th><th>RETURNED BY</th><th>RETURN RECORDED BY</th></tr></thead><tbody id="returned-tiles"></tbody></table></div><div class="empty-state" id="returned-tiles-empty"><span class="empty-icon">↩</span><strong>No returned tiles yet</strong><span>Register a return or import the existing Excel history.</span></div></div>
+        <p class="auth-status" id="returned-tiles-import-status" role="status" aria-live="polite" hidden></p>
+      </section>
+
       <section class="view" id="history-view" aria-labelledby="history-title">
         <div class="page-heading"><div><p class="eyebrow">ORDER AUDIT TRAIL</p><h1 id="history-title">Order history</h1><p class="welcome-copy">Review order creation, edits, status changes, and deletions.</p></div><button class="button button-secondary" type="button" id="history-show-all">Show all history</button></div>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="history-search" type="search" placeholder="Search order, customer, or activity" aria-label="Search order history"></label><span id="history-filter-label" class="history-filter-label"></span></div>
@@ -183,7 +209,7 @@
       </section>
 
       <section class="view" id="item-history-view" aria-labelledby="item-history-title">
-        <div class="page-heading"><div><p class="eyebrow">PRODUCT ACTIVITY</p><h1 id="item-history-title">Item history</h1><p class="welcome-copy">Review transfers, quantity adjustments, and catalog edits for each item.</p></div></div>
+        <div class="page-heading"><div><p class="eyebrow">PRODUCT ACTIVITY</p><h1 id="item-history-title">Item history</h1><p class="welcome-copy">Review transfers, returned tiles, quantity adjustments, and catalog edits for each item.</p></div></div>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="item-history-search" type="search" placeholder="Search reference, product, customer, or branch" aria-label="Search item history"></label></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th>DATE</th><th>REFERENCE</th><th>PRODUCT</th><th>FROM</th><th>TO</th><th>QUANTITY</th><th>UNIT</th></tr></thead><tbody id="item-history"></tbody></table></div><div class="empty-state" id="item-history-empty"><span class="empty-icon">▤</span><strong>No item history yet</strong><span>Saved transfer items will appear here.</span></div></div>
       </section>

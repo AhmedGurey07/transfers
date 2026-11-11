@@ -1,8 +1,10 @@
 const fs = require("node:fs");
 const http = require("node:http");
+const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { execFile } = require("node:child_process");
+const { randomUUID } = require("node:crypto");
 
 const root = __dirname;
 const workbookPath = "C:\\Users\\User\\OneDrive\\Desktop\\Ware house 200 last update 04-07-2026.xlsm";
@@ -10,8 +12,9 @@ let activeWorkbookPath = workbookPath;
 const calculatorPath = "C:\\Users\\User\\OneDrive\\Desktop\\AHMED FOLDER\\calculator";
 const additionalConverterPath = "C:\\Users\\User\\OneDrive\\Desktop\\lessons\\calculator\\60x6046crt.html";
 const sourceReader = path.join(root, "read-sources.ps1");
+const returnedTilesReader = path.join(root, "read-returned-tiles.ps1");
 const port = Number(process.env.PORT) || 8765;
-const hiddenFiles = new Set(["read-sources.ps1", "write-sources.ps1", "sync-server.js", "start order desk.cmd"]);
+const hiddenFiles = new Set(["read-sources.ps1", "read-returned-tiles.ps1", "write-sources.ps1", "sync-server.js", "start order desk.cmd"]);
 const writerScript = path.join(root, "write-sources.ps1");
 let sourceData = null;
 let sourceError = "";
@@ -20,9 +23,16 @@ let attemptedSourceStamp = "";
 let refreshInProgress = null;
 
 function getSourceStamp() {
-  const files = [activeWorkbookPath, additionalConverterPath, ...fs.readdirSync(calculatorPath)
-    .filter((name) => name.toLowerCase().endsWith(".html"))
-    .map((name) => path.join(calculatorPath, name))];
+  const files = [];
+  if (activeWorkbookPath && fs.existsSync(activeWorkbookPath)) files.push(activeWorkbookPath);
+  if (additionalConverterPath && fs.existsSync(additionalConverterPath)) files.push(additionalConverterPath);
+  if (fs.existsSync(calculatorPath)) {
+    files.push(...fs.readdirSync(calculatorPath)
+      .filter((name) => name.toLowerCase().endsWith(".html"))
+      .map((name) => path.join(calculatorPath, name))
+      .filter((filePath) => fs.existsSync(filePath)));
+  }
+  if (!files.length) return "missing-source-files";
   return files.map((file) => {
     const stat = fs.statSync(file);
     return `${file}:${stat.size}:${stat.mtimeMs}`;
@@ -31,6 +41,14 @@ function getSourceStamp() {
 
 function readSourceData() {
   return new Promise((resolve, reject) => {
+    if (!activeWorkbookPath || !fs.existsSync(activeWorkbookPath)) {
+      reject(new Error(`The workbook path was not found: ${activeWorkbookPath || "<not set>"}`));
+      return;
+    }
+    if (!fs.existsSync(calculatorPath)) {
+      reject(new Error(`The calculator folder was not found: ${calculatorPath}`));
+      return;
+    }
     execFile("powershell.exe", [
       "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", sourceReader
     ], {
@@ -135,7 +153,7 @@ function contentType(filePath) {
 
 const server = http.createServer(async (request, response) => {
   const requestUrl = new URL(request.url, `http://127.0.0.1:${port}`);
-  if (request.method === "OPTIONS" && ["/api/data", "/api/refresh", "/api/upload-workbook", "/api/write-workbook"].includes(requestUrl.pathname)) {
+  if (request.method === "OPTIONS" && ["/api/data", "/api/refresh", "/api/upload-workbook", "/api/write-workbook", "/api/import-returned-tiles"].includes(requestUrl.pathname)) {
     response.writeHead(204, {
       "Access-Control-Allow-Origin": "null",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -251,6 +269,52 @@ const server = http.createServer(async (request, response) => {
       } catch (error) {
         try { await fs.promises.unlink(temporaryPath); } catch {}
         sendJson(request, response, 500, { ok: false, error: error.message || "Could not save the uploaded workbook." });
+      }
+    });
+    return;
+  }
+  if (requestUrl.pathname === "/api/import-returned-tiles" && request.method === "POST") {
+    const maxWorkbookSize = 25 * 1024 * 1024;
+    const chunks = [];
+    let received = 0;
+    let rejected = false;
+    request.on("data", (chunk) => {
+      received += chunk.length;
+      if (received > maxWorkbookSize) {
+        rejected = true;
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("error", (error) => {
+      if (!rejected) sendJson(request, response, 400, { ok: false, error: `Could not receive the workbook: ${error.message}` });
+    });
+    request.on("end", async () => {
+      if (rejected) return;
+      if (!received) {
+        sendJson(request, response, 400, { ok: false, error: "Choose a returned-tiles Excel workbook." });
+        return;
+      }
+      const uploadedPath = path.join(os.tmpdir(), `order-desk-returns-${process.pid}-${randomUUID()}.xlsm`);
+      try {
+        await fs.promises.writeFile(uploadedPath, Buffer.concat(chunks));
+        const stdout = await new Promise((resolve, reject) => execFile("powershell.exe", [
+          "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", returnedTilesReader
+        ], {
+          windowsHide: true,
+          maxBuffer: 8 * 1024 * 1024,
+          env: { ...process.env, ORDER_DESK_RETURNS_WORKBOOK_PATH: uploadedPath }
+        }, (error, output, stderr) => error
+          ? reject(new Error((stderr || error.message).trim()))
+          : resolve(output)));
+        const returns = JSON.parse(stdout);
+        if (!Array.isArray(returns)) throw new Error("The returned-tiles workbook did not contain a valid worksheet.");
+        sendJson(request, response, 200, { ok: true, returns });
+      } catch (error) {
+        sendJson(request, response, 422, { ok: false, error: error.message || "Could not read the returned-tiles workbook." });
+      } finally {
+        try { await fs.promises.unlink(uploadedPath); } catch {}
       }
     });
     return;

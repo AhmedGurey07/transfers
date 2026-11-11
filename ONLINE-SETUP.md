@@ -45,6 +45,8 @@ The first sign-in on each browser imports its saved orders that are not already 
 
 The local source-file sync is provided by `Start Order Desk.cmd`; it reads the warehouse workbook and calculator files for the running local web server.
 
+Returned tiles are saved in the separate `returned_tile_records` Supabase table without changing catalog stock. Each return records the signed-in user who saved it. For an existing project, run `supabase-returned-tiles.sql` in Supabase SQL Editor to enable the returns table and its access policies; the complete `supabase-schema.sql` also creates it for a new project. To import the existing returned-tiles Excel workbook, open the app with `Start Order Desk.cmd`, sign in, and use **Returned tiles → Import Excel history**. The importer reads the `SalesData` worksheet; re-importing the same workbook skips records already imported.
+
 ## Find Order Desk easily on a Windows PC
 
 ### Local version

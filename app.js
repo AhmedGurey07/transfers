@@ -125,6 +125,9 @@
   let adjustingCatalogIndex = -1;
   let catalogAdjustments = [];
   let catalogEditHistory = [];
+  let returnedTiles = [];
+  let returnedTilesSetupError = "";
+  let editingReturnedTileId = "";
   let viewHistory = [];
   let orderFormSnapshot = "";
   function indexProductCatalog() {
@@ -253,7 +256,7 @@
       edit.className = "order-action-button";
       edit.setAttribute("aria-label", "Edit product");
       edit.title = "Edit product";
-      edit.innerHTML = '<span class="sr-only">Edit</span>';
+      edit.textContent = "Edit";
       edit.addEventListener("click", (event) => {
         event.stopPropagation();
         beginCatalogEdit(productCatalog.indexOf(item));
@@ -263,7 +266,7 @@
       add.className = "order-action-button";
       add.setAttribute("aria-label", "Add quantity");
       add.title = "Add quantity";
-      add.innerHTML = '<span class="sr-only">Add</span>';
+      add.textContent = "Add";
       add.addEventListener("click", (event) => {
         event.stopPropagation();
         beginCatalogAdjustment(productCatalog.indexOf(item), 1);
@@ -273,7 +276,7 @@
       history.className = "order-action-button";
       history.setAttribute("aria-label", "View product history");
       history.title = "Show this product's item history";
-      history.innerHTML = '<span class="sr-only">History</span>';
+      history.textContent = "History";
       history.addEventListener("click", (event) => {
         event.stopPropagation();
         itemHistoryProductFilter = item.product;
@@ -739,6 +742,284 @@
     }
   }
 
+  function returnedTileDate(value) {
+    if (!value) return "—";
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? new Date(`${value}T12:00:00`)
+      : new Date(value);
+    return Number.isNaN(date.getTime())
+      ? value
+      : new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(date);
+  }
+
+  function renderReturnedTiles() {
+    const status = $("#returned-tile-status");
+    const unavailable = Boolean(returnedTilesSetupError);
+    $("#save-returned-tile").disabled = unavailable;
+    $("#import-returned-tiles").disabled = unavailable;
+    if (unavailable) {
+      status.textContent = returnedTilesSetupError;
+      status.classList.add("error");
+    } else if (status.textContent === "Run supabase-returned-tiles.sql in Supabase SQL Editor, then reload this app to enable returned tiles.") {
+      status.textContent = "";
+      status.classList.remove("error");
+    }
+    const query = $("#returned-tiles-search").value.trim().toLocaleLowerCase();
+    const entries = [...returnedTiles]
+      .filter((entry) => [
+        entry.returnedFrom, entry.product, entry.branch, entry.driver,
+        entry.returnedBy, entry.recordedBy, entry.sourceNo
+      ].join(" ").toLocaleLowerCase().includes(query))
+      .sort((left, right) => String(right.returnedDate || "").localeCompare(String(left.returnedDate || ""))
+        || Number(right.createdAt || 0) - Number(left.createdAt || 0));
+    const rows = entries.map((entry) => {
+      const row = document.createElement("tr");
+      row.classList.add("clickable-returned-tile-row");
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-label", `Edit returned tile ${entry.product} returned from ${entry.returnedFrom}`);
+      row.addEventListener("click", () => beginReturnedTileEdit(entry.id));
+      row.addEventListener("keydown", (event) => {
+        if (event.target !== row || !["Enter", " "].includes(event.key)) return;
+        event.preventDefault();
+        beginReturnedTileEdit(entry.id);
+      });
+      [
+        entry.sourceNo || "—",
+        entry.returnedFrom || "—",
+        entry.product || "—",
+        entry.branch || "—",
+        entry.driver || "—",
+        formatCatalogNumber(entry.cartons),
+        formatCatalogNumber(entry.firi),
+        returnedTileDate(entry.deliveredDate),
+        returnedTileDate(entry.returnedDate),
+        entry.returnedBy || "—",
+        entry.recordedBy || "—"
+      ].forEach((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      });
+      return row;
+    });
+    $("#returned-tiles").replaceChildren(...rows);
+    labelTableRows($("#returned-tiles"));
+    $("#returned-tiles-count").textContent = returnedTiles.length.toLocaleString("en");
+    $("#returned-tiles-empty").hidden = entries.length > 0;
+  }
+
+  function beginReturnedTileEdit(id) {
+    const entry = returnedTiles.find((candidate) => candidate.id === id);
+    if (!entry) return;
+    editingReturnedTileId = id;
+    $("#returned-tile-form-title").textContent = "Edit returned tile";
+    $("#return-customer").value = entry.returnedFrom || "";
+    $("#return-product").value = entry.product || "";
+    $("#return-branch").value = entry.branch || "";
+    $("#return-driver").value = entry.driver || "";
+    $("#return-cartons").value = String(entry.cartons ?? 0);
+    $("#return-firi").value = String(entry.firi ?? 0);
+    $("#return-delivered-date").value = entry.deliveredDate || "";
+    $("#return-date").value = entry.returnedDate || "";
+    $("#return-returned-by").value = entry.returnedBy || "";
+    $("#save-returned-tile").textContent = "Save changes";
+    $("#cancel-returned-tile-edit").hidden = false;
+    $("#returned-tile-status").textContent = "";
+    $("#returned-tile-status").classList.remove("error");
+    $("#returned-tile-form").scrollIntoView({ behavior: "smooth", block: "start" });
+    $("#return-customer").focus({ preventScroll: true });
+  }
+
+  function closeReturnedTileEdit() {
+    editingReturnedTileId = "";
+    $("#returned-tile-form").reset();
+    $("#return-cartons").value = "0";
+    $("#return-firi").value = "0";
+    $("#return-date").value = dateValue();
+    $("#returned-tile-form-title").textContent = "Register a returned tile";
+    $("#save-returned-tile").textContent = "Save return";
+    $("#cancel-returned-tile-edit").hidden = true;
+    $("#returned-tile-status").textContent = "";
+    $("#returned-tile-status").classList.remove("error");
+  }
+
+  async function saveReturnedTile(event) {
+    event.preventDefault();
+    const form = $("#returned-tile-form");
+    const status = $("#returned-tile-status");
+    if (!form.reportValidity()) return;
+    status.classList.remove("error");
+    if (!cloudUser || !supabaseClient) {
+      status.textContent = "Sign in to save returned tiles.";
+      status.classList.add("error");
+      return;
+    }
+    if (returnedTilesSetupError) {
+      status.textContent = returnedTilesSetupError;
+      status.classList.add("error");
+      return;
+    }
+    const cartons = Number($("#return-cartons").value);
+    const firi = Number($("#return-firi").value);
+    if (!Number.isFinite(cartons) || cartons < 0 || !Number.isFinite(firi) || firi < 0
+      || cartons + firi <= 0) {
+      status.textContent = "Enter a quantity greater than zero in Cartons or FIRI.";
+      status.classList.add("error");
+      return;
+    }
+    const existing = editingReturnedTileId
+      ? returnedTiles.find((candidate) => candidate.id === editingReturnedTileId)
+      : null;
+    if (editingReturnedTileId && !existing) {
+      status.textContent = "This return is no longer available. Refresh the list and try again.";
+      status.classList.add("error");
+      return;
+    }
+    const now = Date.now();
+    const entry = { ...(existing || {}) };
+    [
+      "deliveryRecipient", "deliveryBranch", "deliveryDriver", "deliveryDate",
+      "deliveredRecordedBy", "deliveredRecordedAt"
+    ].forEach((field) => delete entry[field]);
+    Object.assign(entry, {
+      id: existing?.id || `return-${now}-${Math.random().toString(36).slice(2)}`,
+      createdAt: existing?.createdAt || now,
+      returnedFrom: $("#return-customer").value.trim(),
+      product: $("#return-product").value.trim(),
+      branch: $("#return-branch").value.trim(),
+      driver: $("#return-driver").value.trim(),
+      cartons,
+      firi,
+      deliveredDate: $("#return-delivered-date").value,
+      returnedDate: $("#return-date").value,
+      returnedBy: $("#return-returned-by").value.trim(),
+      recordedBy: usernameForUser(cloudUser),
+      ...(existing ? {
+        returnEditedAt: now,
+        returnEditedBy: usernameForUser(cloudUser)
+      } : {})
+    });
+    const previousEntries = returnedTiles;
+    returnedTiles = existing
+      ? returnedTiles.map((candidate) => candidate.id === entry.id ? entry : candidate)
+      : [...returnedTiles, entry];
+    status.textContent = existing ? "Saving return changes…" : "Saving returned tile…";
+    status.classList.remove("error");
+    $("#save-returned-tile").disabled = true;
+    try {
+      const { data: savedEntry, error } = existing
+        ? await supabaseClient.from("returned_tile_records")
+          .update({ data: entry, updated_at: new Date().toISOString() })
+          .eq("id", entry.id)
+          .select("id")
+          .maybeSingle()
+        : await supabaseClient.from("returned_tile_records")
+          .insert({ id: entry.id, data: entry })
+          .select("id")
+          .maybeSingle();
+      if (error) throw error;
+      if (!savedEntry) throw new Error("The returned-tile record was not saved. Refresh the list and try again.");
+      closeReturnedTileEdit();
+      status.textContent = existing
+        ? "Return changes saved. Catalog stock was not changed."
+        : "Return saved. Catalog stock was not changed.";
+      renderReturnedTiles();
+      renderItemHistory();
+      showToast(existing ? "Returned tile updated." : "Returned tile saved.");
+    } catch (error) {
+      returnedTiles = previousEntries;
+      console.error("Could not save returned tile.", error);
+      status.textContent = error.message || "Could not save this return.";
+      status.classList.add("error");
+    } finally {
+      $("#save-returned-tile").disabled = false;
+    }
+  }
+
+  async function importReturnedTiles(file) {
+    const status = $("#returned-tiles-import-status");
+    status.hidden = false;
+    status.classList.remove("error");
+    try {
+      if (!file) return;
+      if (!cloudUser || !supabaseClient) throw new Error("Sign in before importing returned-tile history.");
+      if (returnedTilesSetupError) throw new Error(returnedTilesSetupError);
+      const fileApp = location.protocol === "file:";
+      const localServer = fileApp || location.protocol === "http:"
+        && ["127.0.0.1", "localhost"].includes(location.hostname);
+      if (!localServer) {
+        throw new Error("Excel history import is available when you open the app with Start Order Desk.cmd.");
+      }
+      if (file.size > 25 * 1024 * 1024) throw new Error("Choose a workbook smaller than 25 MB.");
+      status.textContent = "Reading returned-tile history…";
+      const apiBase = fileApp ? "http://127.0.0.1:8765" : "";
+      const response = await fetch(`${apiBase}/api/import-returned-tiles`, {
+        method: "POST",
+        body: file,
+        cache: "no-store",
+        mode: fileApp ? "cors" : "same-origin"
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || "Could not read the returned-tile workbook.");
+      if (!Array.isArray(result.returns) || result.returns.some((entry) =>
+        !entry || typeof entry.product !== "string" || typeof entry.returnedFrom !== "string"
+      )) {
+        throw new Error("The workbook does not contain valid returned-tile rows.");
+      }
+      const workbookReturns = result.returns
+        .filter((entry) => entry.product.trim() && entry.returnedFrom.trim());
+      const existingById = new Map(returnedTiles.map((entry) => [entry.id, entry]));
+      const imported = workbookReturns
+        .filter((entry) => !existingById.has(entry.id))
+        .map((entry) => ({
+          ...entry,
+          createdAt: Number(entry.createdAt) || Date.now(),
+          recordedBy: String(entry.recordedBy || "").trim() || usernameForUser(cloudUser)
+        }));
+      const recorderUpdates = workbookReturns.flatMap((source) => {
+        const existing = existingById.get(source.id);
+        const recordedBy = String(source.recordedBy || "").trim();
+        return existing && !String(existing.recordedBy || "").trim() && recordedBy
+          ? [{ ...existing, recordedBy }]
+          : [];
+      });
+      if (!imported.length && !recorderUpdates.length) {
+        status.textContent = "No new returns found. Previously imported rows were left unchanged.";
+        return;
+      }
+      const previousEntries = returnedTiles;
+      const updatedById = new Map(recorderUpdates.map((entry) => [entry.id, entry]));
+      returnedTiles = [
+        ...returnedTiles.map((entry) => updatedById.get(entry.id) || entry),
+        ...imported
+      ];
+      try {
+        const { error } = await supabaseClient.from("returned_tile_records").upsert(
+          [...recorderUpdates, ...imported].map((entry) => ({ id: entry.id, data: entry })),
+          { onConflict: "id" }
+        );
+        if (error) throw error;
+      } catch (error) {
+        returnedTiles = previousEntries;
+        throw error;
+      }
+      const messages = [];
+      if (imported.length) messages.push(`Imported ${imported.length.toLocaleString("en")} return records`);
+      if (recorderUpdates.length) {
+        messages.push(`loaded recorder names for ${recorderUpdates.length.toLocaleString("en")} existing returns`);
+      }
+      status.textContent = `${messages.join(" and ")}. Catalog stock was not changed.`;
+      renderReturnedTiles();
+      renderItemHistory();
+      showToast(messages.join(" and ") + ".");
+    } catch (error) {
+      console.error("Could not import returned-tile history.", error);
+      status.textContent = error.message || "Could not import this workbook.";
+      status.classList.add("error");
+    }
+  }
+
   function setSyncStatus(message, isError = false) {
     const status = $("#sync-status");
     status.textContent = message;
@@ -1180,14 +1461,30 @@
   }
 
   async function loadCloudData(importLocalData) {
-    const [orderResult, driverResult, catalogResult] = await Promise.all([
+    const [orderResult, driverResult, catalogResult, returnResult] = await Promise.all([
       supabaseClient.from("orders").select("id,data").order("id"),
       supabaseClient.from("drivers").select("driver_key,name,phone").order("name"),
-      supabaseClient.from("workspace_catalog").select("data").eq("catalog_key", "default").maybeSingle()
+      supabaseClient.from("workspace_catalog").select("data").eq("catalog_key", "default").maybeSingle(),
+      supabaseClient.from("returned_tile_records").select("id,data").order("id")
     ]);
     if (orderResult.error) throw orderResult.error;
     if (driverResult.error) throw driverResult.error;
     if (catalogResult.error) throw catalogResult.error;
+    if (returnResult.error) {
+      if (["42P01", "PGRST205"].includes(returnResult.error.code)) {
+        returnedTiles = [];
+        returnedTilesSetupError = "Run supabase-returned-tiles.sql in Supabase SQL Editor, then reload this app to enable returned tiles.";
+      } else {
+        throw returnResult.error;
+      }
+    } else {
+      returnedTilesSetupError = "";
+      returnedTiles = returnResult.data.map((row) => row.data);
+      if (returnedTiles.some((entry) => !entry || typeof entry.id !== "string"
+        || typeof entry.returnedFrom !== "string" || typeof entry.product !== "string")) {
+        throw new Error("The shared returned-tile history contains an invalid record.");
+      }
+    }
     if (catalogResult.data?.data && catalogHasWorkbookColumns(catalogResult.data.data)) {
       applySyncedSourceData(catalogResult.data.data);
     }
@@ -1528,10 +1825,13 @@
 
   function subscribeToCloudChanges() {
     if (cloudChannel) supabaseClient.removeChannel(cloudChannel);
-    cloudChannel = supabaseClient.channel("order-desk-shared-data")
+    let channel = supabaseClient.channel("order-desk-shared-data")
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, scheduleCloudRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "drivers" }, scheduleCloudRefresh)
-      .subscribe((status, error) => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "drivers" }, scheduleCloudRefresh);
+    if (!returnedTilesSetupError) {
+      channel = channel.on("postgres_changes", { event: "*", schema: "public", table: "returned_tile_records" }, scheduleCloudRefresh);
+    }
+    cloudChannel = channel.subscribe((status, error) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           const message = error?.message || `Realtime connection ${status.toLowerCase()}.`;
           console.error("Could not subscribe to online changes.", error || message);
@@ -2163,13 +2463,7 @@
         const descriptions = row.lines.map(({ productItems }) =>
           productItems.map((item) => item.text).join(" ").trim()
         ).filter(Boolean);
-        const originalDescription = descriptions.join(" - ");
-        const catalogDescription = catalogProduct?.product.replace(/^\[[^\]]+\]\s*/, "");
-        const detailDescriptions = descriptions.slice(1).filter((description) => {
-          const normalized = cleanPdfText(description).toLocaleLowerCase();
-          return normalized && !cleanPdfText(catalogDescription || "").toLocaleLowerCase().includes(normalized);
-        });
-        const product = [descriptions[0], ...detailDescriptions].filter(Boolean).join(" - ") || originalDescription;
+        const product = descriptions.join(" ").replace(/\s+/g, " ").trim();
         const qtyItem = catalogProduct?.qtyItems?.length === 1 ? Number(catalogProduct.qtyItems[0]) : NaN;
         let quantities = [{ quantity: deliveredQuantity.quantity, unit: deliveredQuantity.unit }];
         if (isTileProduct(product)) {
@@ -2267,12 +2561,13 @@
     $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${name}-view`));
     $$("[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === name));
     $("#app-back-button").hidden = name === "overview";
-    const labels = { overview: "Overview", orders: "All orders", catalog: "Product catalog", history: "Order history", "transfer-history": "Transfer history", "item-history": "Item history", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
+    const labels = { overview: "Overview", orders: "All orders", catalog: "Product catalog", history: "Order history", "transfer-history": "Transfer history", "item-history": "Item history", "returned-tiles": "Returned tiles", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
     $("#breadcrumb-current").textContent = labels[name] || "Overview";
     if (name === "orders") renderAllOrders();
     if (name === "history") renderHistory();
     if (name === "transfer-history") renderTransferHistory();
     if (name === "item-history") renderItemHistory();
+    if (name === "returned-tiles") renderReturnedTiles();
     if (name === "overview") renderOverview();
     if (name === "users" && ["owner", "admin"].includes(cloudRole)) loadWorkspaceUsers();
     if (name === "profile") prepareProfileForm();
@@ -3985,6 +4280,30 @@
         quantityHighlight: true,
         adjustmentDirection: entry.amount > 0 ? "added" : "subtracted"
       }));
+    const returnedTileEntries = returnedTiles
+      .filter((entry) => matchesItemHistoryProduct(entry.product)
+        && (itemHistoryProductFilter
+          || visibleDates.has(entry.returnedDate || dateValue(new Date(entry.createdAt || 0)))))
+      .map((entry) => {
+        const dateTime = /^\d{4}-\d{2}-\d{2}$/.test(entry.returnedDate || "")
+          ? new Date(`${entry.returnedDate}T12:00:00`).getTime()
+          : Number(entry.createdAt) || 0;
+        const quantity = `${formatCatalogNumber(entry.cartons || 0)} CRT + ${formatCatalogNumber(entry.firi || 0)} FIRI`;
+        const receivedEntry = {
+          id: entry.id,
+          timestamp: dateTime,
+          date: entry.returnedDate,
+          product: entry.product,
+          reference: `Returned tiles${entry.sourceNo ? ` · ${entry.sourceNo}` : ""}`,
+          from: [entry.returnedFrom, entry.branch].filter(Boolean).join(" · ") || "Customer",
+          to: "WH2/Warehouse 200k",
+          quantity,
+          unit: "Returned",
+          returnedTile: true,
+          recordedBy: entry.recordedBy
+        };
+        return receivedEntry;
+      });
     const catalogEditEntries = catalogEditHistory
       .filter((entry) => matchesItemHistoryProduct(entry.product)
         || matchesItemHistoryProduct(entry.previousProduct))
@@ -4000,7 +4319,7 @@
         unit: "—",
         catalogEdit: true
       })));
-    const entries = [...orderEntries, ...adjustmentEntries, ...catalogEditEntries]
+    const entries = [...orderEntries, ...adjustmentEntries, ...returnedTileEntries, ...catalogEditEntries]
       .filter((entry) => `${entry.reference} ${entry.product} ${entry.previousProduct || ""} ${entry.from} ${entry.to} ${entry.reason || ""}`.toLowerCase().includes(query))
       .sort((left, right) => right.timestamp - left.timestamp);
     const rows = entries.map((entry) => {
@@ -4036,7 +4355,7 @@
       dateCell.textContent = date;
       row.append(dateCell);
       const referenceCell = document.createElement("td");
-      if (entry.catalogEdit) {
+      if (entry.catalogEdit || entry.returnedTile) {
         referenceCell.textContent = entry.reference;
       } else {
         const referenceButton = document.createElement("button");
@@ -4664,6 +4983,15 @@
   $("#catalog-edit-cancel").addEventListener("click", closeCatalogEdit);
   $("#catalog-adjust-form").addEventListener("submit", saveCatalogAdjustment);
   $("#catalog-adjust-cancel").addEventListener("click", closeCatalogAdjustment);
+  $("#returned-tile-form").addEventListener("submit", saveReturnedTile);
+  $("#cancel-returned-tile-edit").addEventListener("click", closeReturnedTileEdit);
+  $("#returned-tiles-search").addEventListener("input", renderReturnedTiles);
+  $("#import-returned-tiles").addEventListener("click", () => $("#returned-tiles-file").click());
+  $("#returned-tiles-file").addEventListener("change", (event) => {
+    const file = event.target.files[0];
+    event.target.value = "";
+    importReturnedTiles(file);
+  });
   ["quantities", "taken", "qty-items"].forEach((field) => {
     $(`#catalog-edit-${field}`).addEventListener("input", updateCatalogDerivedFields);
   });
@@ -4720,6 +5048,8 @@
     renderProductCatalogOptions();
     renderSavedDrivers();
     $("#order-date").value = dateValue();
+    $("#return-date").value = dateValue();
+    renderReturnedTiles();
     if (!itemsBody.children.length) createItemRow();
     updateConverterVisibility();
     updateConverter();

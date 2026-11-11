@@ -11,6 +11,12 @@ create table if not exists public.drivers (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.returned_tile_records (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.workspace_catalog (
   catalog_key text primary key default 'default',
   data jsonb not null,
@@ -29,6 +35,7 @@ create unique index if not exists workspace_user_roles_single_owner
 
 alter table public.orders enable row level security;
 alter table public.drivers enable row level security;
+alter table public.returned_tile_records enable row level security;
 alter table public.workspace_catalog enable row level security;
 alter table public.workspace_user_roles enable row level security;
 
@@ -48,6 +55,14 @@ create policy "Authenticated workspace access"
   using (true)
   with check (true);
 
+drop policy if exists "Authenticated workspace access" on public.returned_tile_records;
+create policy "Authenticated workspace access"
+  on public.returned_tile_records
+  for all
+  to authenticated
+  using (true)
+  with check (true);
+
 drop policy if exists "Authenticated workspace access" on public.workspace_catalog;
 create policy "Authenticated workspace access"
   on public.workspace_catalog
@@ -58,6 +73,7 @@ create policy "Authenticated workspace access"
 
 grant select, insert, update, delete on public.orders to authenticated;
 grant select, insert, update, delete on public.drivers to authenticated;
+grant select, insert, update, delete on public.returned_tile_records to authenticated;
 grant select, insert, update, delete on public.workspace_catalog to authenticated;
 grant select on public.workspace_user_roles to authenticated;
 
@@ -140,6 +156,14 @@ begin
       and tablename = 'drivers'
   ) then
     alter publication supabase_realtime add table public.drivers;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'returned_tile_records'
+  ) then
+    alter publication supabase_realtime add table public.returned_tile_records;
   end if;
 end
 $$;

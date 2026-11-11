@@ -115,6 +115,26 @@ h2 { margin: 0; font: 700 15px Manrope, sans-serif; letter-spacing: -.15px; }
 .text-button span { font-size: 14px; margin-left: 4px; }
 .table-card { border: 1px solid #e8ebe5; border-radius: 9px; background: #fff; box-shadow: var(--shadow); overflow: hidden; }
 .table-scroll { overflow-x: auto; }
+#returned-tiles-view .table-scroll { overflow-x: hidden; }
+#returned-tiles-view .table-scroll table { width: 100%; table-layout: fixed; }
+#returned-tiles-view .table-scroll th,
+#returned-tiles-view .table-scroll td {
+  padding-right: 7px;
+  padding-left: 7px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+#returned-tiles-view .table-scroll th:nth-child(1) { width: 4%; }
+#returned-tiles-view .table-scroll th:nth-child(2) { width: 13%; }
+#returned-tiles-view .table-scroll th:nth-child(3) { width: 19%; }
+#returned-tiles-view .table-scroll th:nth-child(4) { width: 7%; }
+#returned-tiles-view .table-scroll th:nth-child(5) { width: 10%; }
+#returned-tiles-view .table-scroll th:nth-child(6) { width: 5%; }
+#returned-tiles-view .table-scroll th:nth-child(7) { width: 4%; }
+#returned-tiles-view .table-scroll th:nth-child(8),
+#returned-tiles-view .table-scroll th:nth-child(9) { width: 9%; }
+#returned-tiles-view .table-scroll th:nth-child(10) { width: 8%; }
+#returned-tiles-view .table-scroll th:nth-child(11) { width: 12%; }
 table { border-collapse: collapse; width: 100%; text-align: left; }
 .table-card th { color: #929b91; background: #fbfcfa; font-size: 8px; letter-spacing: .85px; font-weight: 700; white-space: nowrap; }
 .table-card td, .table-card th { border-bottom: 1px solid #eff1ed; padding: 12px 14px; }
@@ -130,6 +150,8 @@ table { border-collapse: collapse; width: 100%; text-align: left; }
 .table-card th[data-sort-direction="desc"]::after { content: "↓"; }
 .clickable-history-row { cursor: pointer; }
 .clickable-history-row:focus { outline: 2px solid #8bb99a; outline-offset: -2px; }
+.clickable-returned-tile-row { cursor: pointer; }
+.clickable-returned-tile-row:focus { outline: 2px solid #8bb99a; outline-offset: -2px; }
 .warehouse-transfer-row td { color: #8a4b18 !important; background: #fff3d6; font-weight: 700; }
 .warehouse-transfer-row:hover td { background: #ffe9b5; }
 .warehouse-transfer-row .item-history-quantity { color: #14b866 !important; }

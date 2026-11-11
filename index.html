@@ -7,13 +7,13 @@
   <link rel="manifest" href="manifest.webmanifest?v=20261109">
   <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=202611101740">
+  <link rel="stylesheet" href="styles.css?v=202611110825">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
-  <script src="app.js?v=202611110748" defer></script>
+  <script src="app.js?v=202611110818" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -183,17 +183,20 @@
             <label class="field"><span>Returned from <i>*</i></span><input id="return-customer" maxlength="160" required></label>
             <label class="field"><span>Tile / product <i>*</i></span><input id="return-product" list="product-catalog" maxlength="200" required></label>
             <label class="field"><span>Branch</span><input id="return-branch" maxlength="80"></label>
-            <label class="field"><span>Original driver</span><input id="return-driver" maxlength="120"></label>
+            <label class="field"><span>Delivered driver</span><input id="return-driver" maxlength="120"></label>
             <label class="field"><span>Cartons</span><input id="return-cartons" type="number" min="0" step="any" value="0" required></label>
             <label class="field"><span>FIRI</span><input id="return-firi" type="number" min="0" step="any" value="0" required></label>
-            <label class="field"><span>Original delivery date</span><input id="return-delivered-date" type="date"></label>
-            <label class="field"><span>Returned date <i>*</i></span><input id="return-date" type="date" required></label>
-            <label class="field"><span>Returned by</span><input id="return-returned-by" maxlength="120"></label>
+            <label class="field"><span>Delivered date</span><input id="return-delivered-date" type="date"></label>
+            <fieldset class="returned-taken-details">
+              <legend>Taken details</legend>
+              <label class="field"><span>Taken date <i>*</i></span><input id="return-date" type="date" required></label>
+              <label class="field"><span>Taken by</span><input id="return-returned-by" maxlength="120"></label>
+            </fieldset>
           </div>
           <div class="form-actions"><span class="auth-status" id="returned-tile-status" role="status" aria-live="polite"></span><div><button class="button button-quiet" id="cancel-returned-tile-edit" type="button" hidden>Cancel edit</button><button class="button button-primary" id="save-returned-tile" type="submit">Save return</button></div></div>
         </form>
-        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="returned-tiles-search" type="search" placeholder="Search customer, product, branch, or driver" aria-label="Search returned tiles"></label><span class="item-count"><span id="returned-tiles-count">0</span> returns</span></div>
-        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>NO</th><th>RETURNED FROM</th><th>PRODUCT</th><th>BRANCH</th><th>ORIGINAL DRIVER</th><th>CARTONS</th><th>FIRI</th><th>DELIVERED DATE</th><th>RETURNED DATE</th><th>RETURNED BY</th><th>RETURN RECORDED BY</th></tr></thead><tbody id="returned-tiles"></tbody></table></div><div class="empty-state" id="returned-tiles-empty"><span class="empty-icon">↩</span><strong>No returned tiles yet</strong><span>Register a return or import the existing Excel history.</span></div></div>
+        <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="returned-tiles-search" type="search" placeholder="Search customer, product, branch, or driver" aria-label="Search returned tiles"></label><span class="item-count"><span id="returned-tiles-count">0</span> returns</span><button class="button button-secondary" type="button" id="export-returned-tiles">Export visible data</button></div>
+        <div class="table-card"><div class="table-scroll"><table class="returned-tiles-table"><thead><tr><th>RETURNED FROM</th><th>PRODUCT</th><th>BRANCH</th><th>DELIVERED DRIVER</th><th>CARTONS</th><th>FIRI</th><th>DELIVERED DATE</th><th>TAKEN DATE</th><th>TAKEN BY</th><th>USER CREATED</th></tr><tr class="returned-tiles-column-filters"><th><input type="search" data-returned-tile-filter="0" placeholder="Search" aria-label="Search returned from"></th><th><input type="search" data-returned-tile-filter="1" placeholder="Search" aria-label="Search product"></th><th><input type="search" data-returned-tile-filter="2" placeholder="Search" aria-label="Search branch"></th><th><input type="search" data-returned-tile-filter="3" placeholder="Search" aria-label="Search delivered driver"></th><th><input type="search" data-returned-tile-filter="4" placeholder="Search" aria-label="Search cartons"></th><th><input type="search" data-returned-tile-filter="5" placeholder="Search" aria-label="Search FIRI"></th><th><input type="search" data-returned-tile-filter="6" placeholder="Search" aria-label="Search delivered date"></th><th><input type="search" data-returned-tile-filter="7" placeholder="Search" aria-label="Search taken date"></th><th><input type="search" data-returned-tile-filter="8" placeholder="Search" aria-label="Search taken by"></th><th><input type="search" data-returned-tile-filter="9" placeholder="Search" aria-label="Search user created"></th></tr></thead><tbody id="returned-tiles"></tbody></table></div><div class="empty-state" id="returned-tiles-empty"><span class="empty-icon">↩</span><strong>No returned tiles yet</strong><span>Register a return or import the existing Excel history.</span></div></div>
         <p class="auth-status" id="returned-tiles-import-status" role="status" aria-live="polite" hidden></p>
       </section>
 

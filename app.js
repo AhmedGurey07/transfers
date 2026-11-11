@@ -765,11 +765,33 @@
       status.classList.remove("error");
     }
     const query = $("#returned-tiles-search").value.trim().toLocaleLowerCase();
+    const columnQueries = $$("[data-returned-tile-filter]")
+      .map((input) => ({ index: Number(input.dataset.returnedTileFilter), query: input.value.trim().toLocaleLowerCase() }))
+      .filter((filter) => filter.query);
+    const valuesForEntry = (entry) => [
+      entry.returnedFrom || "—",
+      entry.product || "—",
+      entry.branch || "—",
+      entry.driver || "—",
+      formatCatalogNumber(entry.cartons),
+      formatCatalogNumber(entry.firi),
+      returnedTileDate(entry.returnedDate),
+      returnedTileDate(entry.deliveredDate),
+      entry.returnedBy || "—",
+      entry.recordedBy || "—"
+    ];
     const entries = [...returnedTiles]
       .filter((entry) => [
         entry.returnedFrom, entry.product, entry.branch, entry.driver,
         entry.returnedBy, entry.recordedBy, entry.sourceNo
       ].join(" ").toLocaleLowerCase().includes(query))
+      .filter((entry) => {
+        const values = valuesForEntry(entry);
+        return columnQueries.every(({ index, query: columnQuery }) => {
+          const dateSearchValue = index === 6 ? entry.returnedDate : index === 7 ? entry.deliveredDate : "";
+          return `${values[index]} ${dateSearchValue}`.toLocaleLowerCase().includes(columnQuery);
+        });
+      })
       .sort((left, right) => String(right.returnedDate || "").localeCompare(String(left.returnedDate || ""))
         || Number(right.createdAt || 0) - Number(left.createdAt || 0));
     const rows = entries.map((entry) => {
@@ -784,19 +806,7 @@
         event.preventDefault();
         beginReturnedTileEdit(entry.id);
       });
-      [
-        entry.sourceNo || "—",
-        entry.returnedFrom || "—",
-        entry.product || "—",
-        entry.branch || "—",
-        entry.driver || "—",
-        formatCatalogNumber(entry.cartons),
-        formatCatalogNumber(entry.firi),
-        returnedTileDate(entry.deliveredDate),
-        returnedTileDate(entry.returnedDate),
-        entry.returnedBy || "—",
-        entry.recordedBy || "—"
-      ].forEach((value) => {
+      valuesForEntry(entry).forEach((value) => {
         const cell = document.createElement("td");
         cell.textContent = value;
         row.append(cell);
@@ -807,6 +817,26 @@
     labelTableRows($("#returned-tiles"));
     $("#returned-tiles-count").textContent = returnedTiles.length.toLocaleString("en");
     $("#returned-tiles-empty").hidden = entries.length > 0;
+  }
+
+  function exportVisibleReturnedTiles() {
+    const table = $(".returned-tiles-table");
+    const rows = [...$("#returned-tiles").rows];
+    if (!rows.length) {
+      showToast("There are no visible returned tiles to export.");
+      return;
+    }
+    if (!window.XLSX) {
+      showToast("Excel export is unavailable. Check your internet connection and reload the app.");
+      return;
+    }
+    const headers = [...table.tHead.rows[0].cells].map((cell) => cell.textContent.trim());
+    const data = rows.map((row) => [...row.cells].map((cell) => cell.textContent.trim()));
+    const worksheet = window.XLSX.utils.aoa_to_sheet([headers, ...data]);
+    const workbook = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(workbook, worksheet, "Returned Tiles");
+    window.XLSX.writeFile(workbook, `returned-tiles-${dateValue()}.xlsx`);
+    showToast(`${rows.length.toLocaleString("en")} visible returned tiles exported.`);
   }
 
   function beginReturnedTileEdit(id) {
@@ -894,7 +924,7 @@
       deliveredDate: $("#return-delivered-date").value,
       returnedDate: $("#return-date").value,
       returnedBy: $("#return-returned-by").value.trim(),
-      recordedBy: usernameForUser(cloudUser),
+      recordedBy: existing?.recordedBy || usernameForUser(cloudUser),
       ...(existing ? {
         returnEditedAt: now,
         returnEditedBy: usernameForUser(cloudUser)
@@ -5097,6 +5127,10 @@
   $("#returned-tile-form").addEventListener("submit", saveReturnedTile);
   $("#cancel-returned-tile-edit").addEventListener("click", closeReturnedTileEdit);
   $("#returned-tiles-search").addEventListener("input", renderReturnedTiles);
+  $("#export-returned-tiles").addEventListener("click", exportVisibleReturnedTiles);
+  $(".returned-tiles-column-filters").addEventListener("input", (event) => {
+    if (event.target.matches("[data-returned-tile-filter]")) renderReturnedTiles();
+  });
   $("#import-returned-tiles").addEventListener("click", () => $("#returned-tiles-file").click());
   $("#returned-tiles-file").addEventListener("change", (event) => {
     const file = event.target.files[0];

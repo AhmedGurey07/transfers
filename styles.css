@@ -116,25 +116,33 @@ h2 { margin: 0; font: 700 15px Manrope, sans-serif; letter-spacing: -.15px; }
 .table-card { border: 1px solid #e8ebe5; border-radius: 9px; background: #fff; box-shadow: var(--shadow); overflow: hidden; }
 .table-scroll { overflow-x: auto; }
 #returned-tiles-view .table-scroll { overflow-x: hidden; }
-#returned-tiles-view .table-scroll table { width: 100%; table-layout: fixed; }
-#returned-tiles-view .table-scroll th,
-#returned-tiles-view .table-scroll td {
+#returned-tiles-view .returned-tiles-table { width: 100%; table-layout: auto; }
+#returned-tiles-view .returned-tiles-table th,
+#returned-tiles-view .returned-tiles-table td {
   padding-right: 7px;
   padding-left: 7px;
   white-space: normal;
   overflow-wrap: anywhere;
 }
-#returned-tiles-view .table-scroll th:nth-child(1) { width: 4%; }
-#returned-tiles-view .table-scroll th:nth-child(2) { width: 13%; }
-#returned-tiles-view .table-scroll th:nth-child(3) { width: 19%; }
-#returned-tiles-view .table-scroll th:nth-child(4) { width: 7%; }
-#returned-tiles-view .table-scroll th:nth-child(5) { width: 10%; }
-#returned-tiles-view .table-scroll th:nth-child(6) { width: 5%; }
-#returned-tiles-view .table-scroll th:nth-child(7) { width: 4%; }
-#returned-tiles-view .table-scroll th:nth-child(8),
-#returned-tiles-view .table-scroll th:nth-child(9) { width: 9%; }
-#returned-tiles-view .table-scroll th:nth-child(10) { width: 8%; }
-#returned-tiles-view .table-scroll th:nth-child(11) { width: 12%; }
+#returned-tiles-view .returned-tiles-table thead tr:first-child th { text-align: center; }
+#returned-tiles-view .returned-tiles-column-filters th {
+  padding: 4px 5px;
+  background: #fff;
+}
+#returned-tiles-view .returned-tiles-column-filters input {
+  width: 100%;
+  min-width: 0;
+  height: 27px;
+  padding: 3px 5px;
+  border: 1px solid #e3e8e1;
+  border-radius: 4px;
+  outline-color: var(--green);
+  color: var(--ink);
+  background: #fff;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
 table { border-collapse: collapse; width: 100%; text-align: left; }
 .table-card th { color: #929b91; background: #fbfcfa; font-size: 8px; letter-spacing: .85px; font-weight: 700; white-space: nowrap; }
 .table-card td, .table-card th { border-bottom: 1px solid #eff1ed; padding: 12px 14px; }
@@ -332,6 +340,8 @@ form button { font-size: 12px; }
 .converter-toggle { flex: 0 0 auto; }
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); column-gap: 13px; row-gap: 13px; }
 .field { display: grid; gap: 6px; color: #5b665a; font-size: 9.5px; font-weight: 600; }
+.returned-taken-details { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 11px 12px 12px; border: 1px solid #cfe2d3; border-radius: 8px; background: #f3f8f3; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 13px; }
+.returned-taken-details legend { padding: 0 6px; color: #23734d; font-size: 9px; font-weight: 700; letter-spacing: .5px; }
 .field > label { color: #5b665a; font-size: 9.5px; font-weight: 600; }
 .field > span i { color: #cf7d5f; font-style: normal; }
 .field input, .field select, .field textarea { width: 100%; min-height: 35px; border: 1px solid #e4e8e2; border-radius: 5px; padding: 0 10px; outline: 0; color: #3c463c; background: #fff; font-size: 10px; font-weight: 400; }

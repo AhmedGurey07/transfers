@@ -55,6 +55,8 @@ Returned tiles are saved in the separate `returned_tile_records` Supabase table 
 
 The Overview and All orders pages use **Pending**, **In progress**, **Delivered**, and **Cancelled** statuses. Existing **Open** orders are shown as Pending and existing **Completed** orders as Delivered. Click a status pill in either order table to cycle through the four statuses.
 
+Overview count cards are clickable: order cards open the matching order list (including overdue orders), while **Total items** and **Low stock** open the matching catalog products.
+
 Product Catalog highlights products whose numeric **R/QUANTITY** is at or below the shared low-stock threshold. The default is 10; enter another non-negative value and select **Save threshold** to store it with the shared catalog.
 
 **Notifications** are derived from saved order history: order creation, edits, and orders moved to In progress (shown as ready for delivery). Realtime order refresh updates the notification list; unread counts are remembered per user and browser. These are in-app notifications, not email or browser push.
@@ -63,7 +65,7 @@ Product Catalog highlights products whose numeric **R/QUANTITY** is at or below 
 
 **Order filters** let users filter by branch, driver, product, status, and a date range. **Overdue** uses calendar days: Pending orders are flagged after 2 days and In progress orders after 1 day.
 
-**Stock reservations** shows the quantity reserved for Pending/In progress orders and the available catalog quantity. Set a product's optional **Reorder-to target** in the catalog to see a suggested quantity. Staff stock adjustments are submitted as requests and do not change stock until an admin approves them. Workspace owners/admins review requests in **All orders**. Approved orders/adjustments update the catalog.
+**Stock reservations** shows the quantity reserved for Pending/In progress orders and the available catalog quantity. Staff stock adjustments are submitted as requests and do not change stock until an admin approves them. Workspace owners/admins review requests in **All orders**. Approved orders/adjustments update the catalog.
 
 **Scheduled report summaries** can be set to daily or weekly in Reports. The summary is generated in-app while the website is open, or the next time someone opens it after the selected interval; it is not an email or a server-side background job.
 

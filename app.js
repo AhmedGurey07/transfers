@@ -654,6 +654,7 @@
       product: updatedProduct.product,
       previousProduct: previous.product,
       actor: usernameForUser(cloudUser),
+      actorEmail: String(cloudUser.email || "").trim(),
       changes: changedFields
     } : null;
     if (editingCatalogIndex < 0) productCatalog.push(updatedProduct);
@@ -741,6 +742,7 @@
       previousQuantity: quantity,
       updatedQuantity: nextQuantity,
       actor: usernameForUser(cloudUser),
+      actorEmail: String(cloudUser.email || "").trim(),
       reason,
       unit: item.unit || "—"
     };
@@ -4788,7 +4790,7 @@
         quantity: Math.abs(entry.amount),
         warehouseTransfer: false,
         quantityHighlight: true,
-        changedBy: entry.actor || "Unknown user",
+        changedBy: entry.actor || usernameForUser(cloudUser),
         adjustmentDirection: entry.amount > 0 ? "added" : "subtracted"
       }));
     const returnedTileEntries = returnedTiles
@@ -4830,7 +4832,7 @@
           : "—",
         unit: "—",
         catalogEdit: true,
-        changedBy: entry.actor || "Unknown user"
+        changedBy: entry.actor || usernameForUser(cloudUser)
       })));
     const entries = [...orderEntries, ...adjustmentEntries, ...returnedTileEntries, ...catalogEditEntries]
       .filter(matchesSearch)

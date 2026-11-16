@@ -7,13 +7,11 @@
   <link rel="manifest" href="manifest.webmanifest?v=20261109">
   <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=202611130008">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="styles.css?v=202611160003">
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
-  <script src="app.js?v=202611130013" defer></script>
+  <script src="app.js?v=202611160008" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -165,7 +163,7 @@
           <div class="field-grid">
             <label class="field field-wide"><span>Product / description <i>*</i></span><input id="catalog-edit-product" required maxlength="200"></label>
             <label class="field"><span>Quantity</span><input id="catalog-edit-quantities" placeholder="e.g. 20"></label>
-            <label class="field"><span>Q/ITEM</span><input id="catalog-edit-qty-items" placeholder="e.g. 20, 24"></label>
+            <label class="field"><span>Q/ITEM</span><input id="catalog-edit-qty-items" placeholder="e.g. 20, 24"><small>If product descriptions are identical, use different Q/ITEM values.</small></label>
             <label class="field"><span>Taken</span><input id="catalog-edit-taken" placeholder="e.g. 0"></label>
             <label class="field"><span>R/QUANTITY</span><input id="catalog-edit-r-quantities" placeholder="e.g. 1460"></label>
             <label class="field"><span>UOM/N</span><input id="catalog-edit-uom-ns" placeholder="e.g. 73"></label>

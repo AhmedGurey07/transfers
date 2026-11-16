@@ -43,6 +43,8 @@ If profile-photo uploads report **Bucket not found**, open **SQL Editor** for th
 
 The Supabase URL and anon/publishable key are browser-visible identifiers, not privileged secrets. Row-level security protects the role table so users can only read their own role. The Users page is available to owners and admins. Create a user there by entering a username, email, initial password, and role. The account is created in Supabase Authentication and its workspace role is saved in `workspace_user_roles`; share the initial password with the user securely. Admins can create and manage staff; only the owner can grant or remove admin access. Users can open their profile from the top-right avatar to change their username, password, or photo. Password changes are self-service.
 
+The website caches its app files and sign-in library after the first visit, and loads the Excel library only when an Excel feature is used. Repeat visits need less bandwidth; signing in and loading or saving shared workspace data still require an internet connection.
+
 ## Existing browser data
 
 The first sign-in on each browser imports its saved orders that are not already online; existing online records win if an order ID already exists. Saved drivers are added if their names are not already present. Keep the old browser data until you verify the migrated orders on the online site.
@@ -59,11 +61,17 @@ Overview count cards are clickable: order cards open the matching order list (in
 
 Product Catalog highlights products whose numeric **R/QUANTITY** is at or below the shared low-stock threshold. The default is 10; enter another non-negative value and select **Save threshold** to store it with the shared catalog.
 
+Workspace owners and admins can delete a product from the catalog. The confirmation explains that existing orders and item history are kept.
+
 **Notifications** are derived from saved order history: order creation, edits, and orders moved to In progress (shown as ready for delivery). Realtime order refresh updates the notification list; unread counts are remembered per user and browser. These are in-app notifications, not email or browser push.
 
 **Reports** filter orders, transfers, and returned tiles by date range, product, and branch. Use **Export CSV** to download the currently filtered rows. The User activity log includes order history and return creation/edit records, with the recorded username. Item History shows the date and time for each record, and direct catalog quantity additions, reductions, or edits include the before/after quantity and the signed-in user.
 
 **Order filters** let users filter by branch, driver, product, status, and a date range. **Overdue** uses calendar days: Pending orders are flagged after 2 days and In progress orders after 1 day.
+
+When a PDF product code matches one catalog item, the imported order uses the exact product name saved in the catalog, even if the PDF description differs. If the code matches multiple catalog variants, the imported order shows a required **Select catalog item** dropdown. If a numeric slash-suffix code has no exact catalog match, variants with the same base code are offered instead. Choose the exact variant so saving the order subtracts its quantity from that product's **TAKEN** value. Products may share a code while having different descriptions, even when their **Q/ITEM** values match. If descriptions are identical, their **Q/ITEM** values must differ so the order form can select the correct stock entry.
+
+PDF imports check the Transfer ID against saved orders, ignoring differences in letter case and surrounding spaces. A previously saved PDF can still be imported for review, but saving another order with that Transfer ID is blocked.
 
 **Stock reservations** shows the quantity reserved for Pending/In progress orders and the available catalog quantity. Staff stock adjustments are submitted as requests and do not change stock until an admin approves them. Workspace owners/admins review requests in **All orders**. Approved orders/adjustments update the catalog.
 

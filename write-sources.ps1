@@ -37,6 +37,11 @@ function First-Value {
     return [string]$Values
 }
 
+function Get-CatalogRowKey {
+    param([string]$Name, [string]$QtyItem)
+    return "{0}:{1}{2}" -f $Name.Length, $Name, $QtyItem
+}
+
 if (-not (Test-Path -LiteralPath $workbookPath -PathType Leaf)) {
     throw "Warehouse workbook was not found: $workbookPath"
 }
@@ -74,20 +79,66 @@ try {
     $unitColumn = Get-HeaderColumn $values $firstRow $firstColumn $lastColumn @("uom", "unit") 7
     $statusColumn = Get-HeaderColumn $values $firstRow $firstColumn $lastColumn @("sts", "status") 8
     $rowsByProduct = @{}
+    $rowsByProductAndQtyItem = @{}
+    $rowKeysByRow = @{}
     for ($row = $firstRow + 1; $row -le $lastRow; $row++) {
         $name = Convert-CellText $values[$row, $productColumn]
-        if ($name -and -not $rowsByProduct.ContainsKey($name)) { $rowsByProduct[$name] = $row }
+        if ($name) {
+            $qtyItem = Convert-CellText $values[$row, $qtyItemColumn]
+            $key = Get-CatalogRowKey $name $qtyItem
+            if (-not $rowsByProduct.ContainsKey($name)) {
+                $rowsByProduct[$name] = New-Object System.Collections.ArrayList
+            }
+            [void]$rowsByProduct[$name].Add($row)
+            if (-not $rowsByProductAndQtyItem.ContainsKey($key)) {
+                $rowsByProductAndQtyItem[$key] = New-Object System.Collections.ArrayList
+            }
+            [void]$rowsByProductAndQtyItem[$key].Add($row)
+            $rowKeysByRow[$row] = $key
+        }
     }
     $nextRow = $lastRow + 1
     foreach ($product in $payload.products) {
         $name = Convert-CellText $product.product
         if (-not $name) { continue }
-        $row = $rowsByProduct[$name]
+        $qtyItem = Convert-CellText (First-Value $product.qtyItems)
+        $key = Get-CatalogRowKey $name $qtyItem
+        $row = $null
+        if ($rowsByProductAndQtyItem.ContainsKey($key) -and $rowsByProductAndQtyItem[$key].Count) {
+            $row = $rowsByProductAndQtyItem[$key][0]
+            $rowsByProductAndQtyItem[$key].RemoveAt(0)
+            $nameRows = $rowsByProduct[$name]
+            $nameIndex = $nameRows.IndexOf($row)
+            if ($nameIndex -ge 0) { $nameRows.RemoveAt($nameIndex) }
+        } elseif ($rowsByProduct.ContainsKey($name) -and $rowsByProduct[$name].Count) {
+            $nameRows = $rowsByProduct[$name]
+            $row = $nameRows[0]
+            $nameRows.RemoveAt(0)
+            $oldKey = $rowKeysByRow[$row]
+            if ($rowsByProductAndQtyItem.ContainsKey($oldKey)) {
+                $oldRows = $rowsByProductAndQtyItem[$oldKey]
+                $oldIndex = $oldRows.IndexOf($row)
+                if ($oldIndex -ge 0) { $oldRows.RemoveAt($oldIndex) }
+            }
+            $rowKeysByRow[$row] = $key
+            if (-not $rowsByProductAndQtyItem.ContainsKey($key)) {
+                $rowsByProductAndQtyItem[$key] = New-Object System.Collections.ArrayList
+            }
+            [void]$rowsByProductAndQtyItem[$key].Add($row)
+        }
         if (-not $row) {
             $row = $nextRow
             $nextRow++
             $sheet.Cells.Item($row, $productColumn).Value2 = $name
-            $rowsByProduct[$name] = $row
+            if (-not $rowsByProduct.ContainsKey($name)) {
+                $rowsByProduct[$name] = New-Object System.Collections.ArrayList
+            }
+            [void]$rowsByProduct[$name].Add($row)
+            if (-not $rowsByProductAndQtyItem.ContainsKey($key)) {
+                $rowsByProductAndQtyItem[$key] = New-Object System.Collections.ArrayList
+            }
+            [void]$rowsByProductAndQtyItem[$key].Add($row)
+            $rowKeysByRow[$row] = $key
         }
         $sheet.Cells.Item($row, $productColumn).Value2 = $name
         $sheet.Cells.Item($row, $quantityColumn).Value2 = First-Value $product.quantities

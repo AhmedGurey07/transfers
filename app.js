@@ -106,12 +106,23 @@
       .replace(/\s+/g, " ")
       .trim();
   }
+  function extractCatalogCode(value) {
+    const text = String(value || "");
+    const match = text.match(/\[((?:[a-z]\s*)?\d+(?:\s*[/-]\s*\d+)*)\]/i)
+      || text.match(/^\s*((?:[a-z]\s*)?\d+(?:\s*[/-]\s*\d+)*)\b/i);
+    return match?.[1].replace(/\s+/g, "").toLocaleLowerCase() || "";
+  }
+  function getCatalogCodeFamily(code) {
+    return String(code || "").replace(/\/\d+$/, "").toLocaleLowerCase();
+  }
   const productsByName = new Map();
   const productsByPdfName = new Map();
   const productsByCode = new Map();
+  const productsByCodeFamily = new Map();
   let lastSyncedVersion = "";
   let syncInProgress = false;
   let lastSyncError = "";
+  const externalScriptPromises = new Map();
   let supabaseClient = null;
   let cloudUser = null;
   let cloudRole = "staff";
@@ -138,20 +149,74 @@
     productsByName.clear();
     productsByPdfName.clear();
     productsByCode.clear();
+    productsByCodeFamily.clear();
     productCatalog.forEach((item) => {
-      productsByName.set(item.product.toLocaleLowerCase(), item);
-      productsByPdfName.set(cleanPdfText(item.product).toLocaleLowerCase(), item);
-      const code = item.product.match(/^\[([^\]]+)\]/)?.[1];
-      if (code) productsByCode.set(code.toLocaleLowerCase(), item);
+      const nameKey = item.product.toLocaleLowerCase();
+      const pdfNameKey = cleanPdfText(item.product).toLocaleLowerCase();
+      const namedMatches = productsByName.get(nameKey) || [];
+      namedMatches.push(item);
+      productsByName.set(nameKey, namedMatches);
+      const pdfNameMatches = productsByPdfName.get(pdfNameKey) || [];
+      pdfNameMatches.push(item);
+      productsByPdfName.set(pdfNameKey, pdfNameMatches);
+      const code = extractCatalogCode(item.product);
+      if (code) {
+        const matches = productsByCode.get(code) || [];
+        matches.push(item);
+        productsByCode.set(code, matches);
+        const familyCode = getCatalogCodeFamily(code);
+        const familyMatches = productsByCodeFamily.get(familyCode) || [];
+        familyMatches.push(item);
+        productsByCodeFamily.set(familyCode, familyMatches);
+      }
     });
   }
   indexProductCatalog();
-  function getCatalogProduct(product) {
+  function getCatalogProductsByCode(code) {
+    const normalizedCode = String(code || "").replace(/\s+/g, "").toLocaleLowerCase();
+    const exactMatches = productsByCode.get(normalizedCode) || [];
+    if (exactMatches.length) return exactMatches;
+    return productsByCodeFamily.get(getCatalogCodeFamily(normalizedCode)) || [];
+  }
+  function getCatalogMatchChoices(product) {
+    const code = extractCatalogCode(product);
+    const matches = getCatalogProductsByCode(code);
+    return matches.length > 1 ? matches : [];
+  }
+  function getCatalogProductMatches(product) {
     const normalized = String(product || "").toLocaleLowerCase();
-    const code = String(product || "").match(/^\s*\[([^\]]+)\]/)?.[1]?.toLocaleLowerCase();
+    const code = extractCatalogCode(product);
     return productsByName.get(normalized)
       || productsByPdfName.get(cleanPdfText(product).toLocaleLowerCase())
-      || productsByCode.get(code);
+      || getCatalogProductsByCode(code)
+      || [];
+  }
+  function sameCatalogQtyItem(left, right) {
+    const leftValue = String(left ?? "").trim();
+    const rightValue = String(right ?? "").trim();
+    if (!leftValue || !rightValue) return false;
+    const leftNumber = Number(leftValue.replace(",", "."));
+    const rightNumber = Number(rightValue.replace(",", "."));
+    return Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
+      ? leftNumber === rightNumber
+      : leftValue.toLocaleLowerCase() === rightValue.toLocaleLowerCase();
+  }
+  function getCatalogQtyItemOptions(product) {
+    return getCatalogProductMatches(product).flatMap((item) => item.qtyItems || [])
+      .reduce((values, value) => {
+        if (!values.some((existing) => sameCatalogQtyItem(existing, value))) values.push(String(value));
+        return values;
+      }, []);
+  }
+  function getCatalogProduct(product, qtyItem = "") {
+    const matches = getCatalogProductMatches(product);
+    if (String(qtyItem ?? "").trim()) {
+      const selectedMatches = matches.filter((item) =>
+        (item.qtyItems || []).some((value) => sameCatalogQtyItem(value, qtyItem))
+      );
+      return selectedMatches.length === 1 ? selectedMatches[0] : undefined;
+    }
+    return matches.length === 1 ? matches[0] : undefined;
   }
 
   function renderProductCatalogOptions() {
@@ -281,7 +346,7 @@
       const actions = document.createElement("td");
       const edit = document.createElement("button");
       edit.type = "button";
-      edit.className = "order-action-button";
+      edit.className = "order-action-button catalog-edit-button";
       edit.setAttribute("aria-label", "Edit product");
       edit.title = "Edit product";
       edit.textContent = "Edit";
@@ -291,7 +356,7 @@
       });
       const add = document.createElement("button");
       add.type = "button";
-      add.className = "order-action-button";
+      add.className = "order-action-button catalog-add-button";
       add.setAttribute("aria-label", "Add quantity");
       add.title = "Add quantity";
       add.textContent = "Add";
@@ -301,7 +366,7 @@
       });
       const history = document.createElement("button");
       history.type = "button";
-      history.className = "order-action-button";
+      history.className = "order-action-button catalog-history-button";
       history.setAttribute("aria-label", "View product history");
       history.title = "Show this product's item history";
       history.textContent = "History";
@@ -310,6 +375,16 @@
         itemHistoryProductFilter = item.product;
         $("#item-history-search").value = item.product;
         setView("item-history");
+      });
+      const deleteProduct = document.createElement("button");
+      deleteProduct.type = "button";
+      deleteProduct.className = "order-action-button catalog-delete-button";
+      deleteProduct.setAttribute("aria-label", "Delete product");
+      deleteProduct.title = "Delete this product from the catalog";
+      deleteProduct.textContent = "Delete";
+      deleteProduct.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteCatalogProduct(productCatalog.indexOf(item));
       });
       const detailsRow = document.createElement("tr");
       detailsRow.className = "catalog-row-details";
@@ -359,7 +434,9 @@
         expand.title = expanded ? "Show remaining columns" : "Hide remaining columns";
       });
       if (!cloudDeployment || ["owner", "admin"].includes(cloudRole)) actions.append(edit);
-      actions.append(add, history, expand);
+      actions.append(add, history);
+      if (!cloudDeployment || ["owner", "admin"].includes(cloudRole)) actions.append(deleteProduct);
+      actions.append(expand);
       row.append(product, quantity, qtyItem, taken, rQuantity, uomN, unit, status, reserved, available, actions);
       const fragment = document.createDocumentFragment();
       fragment.append(row, detailsRow);
@@ -369,6 +446,58 @@
     $("#catalog-view-count").textContent = filtered.length.toLocaleString("en");
     $("#catalog-overview-filter").hidden = !catalogLowStockOnly;
     $("#catalog-empty").hidden = filtered.length > 0;
+  }
+
+  async function deleteCatalogProduct(index) {
+    if (cloudDeployment && !["owner", "admin"].includes(cloudRole)) {
+      showToast("Only workspace admins can delete catalog products.");
+      return;
+    }
+    if (!cloudUser || !supabaseClient) {
+      showToast("Sign in to delete catalog products.");
+      return;
+    }
+    const item = productCatalog[index];
+    if (!item) return;
+    if (!window.confirm(`Delete "${item.product}" from the catalog? Existing orders and item history will be kept.`)) return;
+
+    const currentIndex = productCatalog.indexOf(item);
+    if (currentIndex < 0) {
+      showToast("This product is no longer in the catalog. Refresh and try again.");
+      return;
+    }
+    const previousProducts = productCatalog;
+    const previousHistory = catalogEditHistory;
+    const historyEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      timestamp: Date.now(),
+      product: item.product,
+      previousProduct: item.product,
+      actor: usernameForUser(cloudUser),
+      actorEmail: String(cloudUser.email || "").trim(),
+      changes: [{ field: "Product / description", before: item.product, after: "Deleted from catalog" }]
+    };
+    productCatalog = productCatalog.filter((product) => product !== item);
+    catalogEditHistory = [...catalogEditHistory, historyEntry];
+    try {
+      await saveCatalogToCloud(currentCatalogData());
+      indexProductCatalog();
+      renderProductCatalogOptions();
+      renderCatalogFilterOptions();
+      renderProductCatalogTable();
+      renderItemHistory();
+      refreshPreview();
+      showToast("Product deleted from the catalog. Existing orders and item history were kept.");
+    } catch (error) {
+      productCatalog = previousProducts;
+      catalogEditHistory = previousHistory;
+      indexProductCatalog();
+      renderProductCatalogOptions();
+      renderCatalogFilterOptions();
+      renderProductCatalogTable();
+      console.error("Could not delete the catalog product.", error);
+      showToast(error.message || "Could not delete the catalog product.");
+    }
   }
 
   function labelTableRows(tbody) {
@@ -678,16 +807,20 @@
     }
     const product = $("#catalog-edit-product").value.trim();
     const unit = $("#catalog-edit-unit").value.trim();
-    const duplicate = productCatalog.some((item, index) =>
-      index !== editingCatalogIndex && item.product.toLocaleLowerCase() === product.toLocaleLowerCase()
-    );
+    const qtyItems = splitCatalogValues($("#catalog-edit-qty-items").value);
+    const duplicate = productCatalog.some((item, index) => {
+      if (index === editingCatalogIndex || item.product.toLocaleLowerCase() !== product.toLocaleLowerCase()) return false;
+      const existingQtyItems = item.qtyItems || [];
+      return !qtyItems.length || !existingQtyItems.length
+        || qtyItems.some((value) => existingQtyItems.some((existing) => sameCatalogQtyItem(existing, value)));
+    });
     if (!unit) {
       $("#catalog-edit-status").textContent = "Select at least one UOM.";
       $("#catalog-edit-status").classList.add("error");
       return;
     }
     if (duplicate) {
-      $("#catalog-edit-status").textContent = "Another product already has this description.";
+      $("#catalog-edit-status").textContent = "A product with this description already uses one of those Q/ITEM values.";
       $("#catalog-edit-status").classList.add("error");
       return;
     }
@@ -698,7 +831,7 @@
       product,
       unit,
       quantities: splitCatalogValues($("#catalog-edit-quantities").value),
-      qtyItems: splitCatalogValues($("#catalog-edit-qty-items").value),
+      qtyItems,
       taken: splitCatalogValues($("#catalog-edit-taken").value),
       rQuantities: splitCatalogValues($("#catalog-edit-r-quantities").value),
       uomNs: splitCatalogValues($("#catalog-edit-uom-ns").value),
@@ -1010,24 +1143,26 @@
     $("#returned-tiles-empty").hidden = entries.length > 0;
   }
 
-  function exportVisibleReturnedTiles() {
+  async function exportVisibleReturnedTiles() {
     const table = $(".returned-tiles-table");
     const rows = [...$("#returned-tiles").rows];
     if (!rows.length) {
       showToast("There are no visible returned tiles to export.");
       return;
     }
-    if (!window.XLSX) {
-      showToast("Excel export is unavailable. Check your internet connection and reload the app.");
-      return;
+    try {
+      const xlsx = await loadXlsxLibrary();
+      const headers = [...table.tHead.rows[0].cells].map((cell) => cell.textContent.trim());
+      const data = rows.map((row) => [...row.cells].map((cell) => cell.textContent.trim()));
+      const worksheet = xlsx.utils.aoa_to_sheet([headers, ...data]);
+      const workbook = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(workbook, worksheet, "Returned Tiles");
+      xlsx.writeFile(workbook, `returned-tiles-${dateValue()}.xlsx`);
+      showToast(`${rows.length.toLocaleString("en")} visible returned tiles exported.`);
+    } catch (error) {
+      console.error("Could not load the Excel export library.", error);
+      showToast(`Excel export unavailable: ${error.message}`);
     }
-    const headers = [...table.tHead.rows[0].cells].map((cell) => cell.textContent.trim());
-    const data = rows.map((row) => [...row.cells].map((cell) => cell.textContent.trim()));
-    const worksheet = window.XLSX.utils.aoa_to_sheet([headers, ...data]);
-    const workbook = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(workbook, worksheet, "Returned Tiles");
-    window.XLSX.writeFile(workbook, `returned-tiles-${dateValue()}.xlsx`);
-    showToast(`${rows.length.toLocaleString("en")} visible returned tiles exported.`);
   }
 
   function beginReturnedTileEdit(id) {
@@ -1209,12 +1344,12 @@
   }
 
   async function readReturnedTileWorkbook(file) {
-    if (!window.XLSX) throw new Error("The Excel reader did not load. Check your internet connection and reload the app.");
-    const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+    const xlsx = await loadXlsxLibrary();
+    const workbook = xlsx.read(await file.arrayBuffer(), { type: "array", cellDates: true });
     const worksheet = workbook.Sheets.SalesData || workbook.Sheets[workbook.SheetNames[0]];
     if (!worksheet) throw new Error("The workbook does not contain a worksheet.");
-    const range = window.XLSX.utils.decode_range(worksheet["!ref"] || "A1:A1");
-    const rows = window.XLSX.utils.sheet_to_json(worksheet, {
+    const range = xlsx.utils.decode_range(worksheet["!ref"] || "A1:A1");
+    const rows = xlsx.utils.sheet_to_json(worksheet, {
       header: 1,
       raw: true,
       defval: "",
@@ -1857,6 +1992,33 @@
     $("#auth-submit").disabled = true;
   }
 
+  function loadExternalScript(url) {
+    const existing = externalScriptPromises.get(url);
+    if (existing) return existing;
+    const promise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = url;
+      script.async = true;
+      script.onload = resolve;
+      script.onerror = () => {
+        externalScriptPromises.delete(url);
+        reject(new Error(`Could not load ${new URL(url).hostname}.`));
+      };
+      document.head.append(script);
+    });
+    externalScriptPromises.set(url, promise);
+    return promise;
+  }
+
+  function loadXlsxLibrary() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    return loadExternalScript("https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js")
+      .then(() => {
+        if (!window.XLSX) throw new Error("The Excel library loaded without initializing.");
+        return window.XLSX;
+      });
+  }
+
   async function loadCloudData(importLocalData) {
     const [orderResult, driverResult, catalogResult, returnResult] = await Promise.all([
       supabaseClient.from("orders").select("id,data").order("id"),
@@ -2346,22 +2508,36 @@
     showAuthGate("Sign in to load your shared online workspace.");
   }
 
-  function initializeOnlineMode() {
+  async function initializeOnlineMode() {
     const config = window.ORDER_DESK_SUPABASE || {};
     const validConfig = typeof config.url === "string" && config.url.startsWith("https://")
       && typeof config.anonKey === "string" && config.anonKey.length > 20;
-    if (!window.supabase?.createClient) {
-      disableAuthForm();
-      showAuthGate("Could not load the Supabase client library. Check your internet connection and reload.", true);
-      return;
-    }
     if (!validConfig) {
       disableAuthForm();
       showAuthGate("Online storage is not configured. Add your Supabase Project URL and anon key to supabase-config.js.", true);
       return;
     }
+    if (!window.supabase?.createClient) {
+      disableAuthForm();
+      showAuthGate("Loading secure workspace sign-in…");
+      try {
+        await loadExternalScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2");
+      } catch (error) {
+        console.error("Could not load the Supabase client library.", error);
+        showAuthGate(`Could not load secure sign-in: ${error.message} Check your internet connection and try again.`, true);
+        return;
+      }
+    }
+    if (!window.supabase?.createClient) {
+      disableAuthForm();
+      showAuthGate("The Supabase client library loaded but could not start. Reload the website and try again.", true);
+      return;
+    }
 
     supabaseClient = window.supabase.createClient(config.url, config.anonKey);
+    $("#auth-email").disabled = false;
+    $("#auth-password").disabled = false;
+    $("#auth-submit").disabled = false;
     supabaseClient.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT") lockCloudApp();
       if (event === "SIGNED_IN" && session?.user) {
@@ -2445,7 +2621,7 @@
           history,
           items: order.items.map((item) => item || {}).map((item) => {
           const product = item.product || "";
-          const catalogProduct = getCatalogProduct(product);
+          const catalogProduct = getCatalogProduct(product, item.qtyItem);
           const catalogUnit = catalogProduct?.unit || units[0];
           const qtyItem = item.qtyItem == null
             ? catalogProduct?.qtyItems?.length === 1 ? catalogProduct.qtyItems[0] : ""
@@ -2844,8 +3020,11 @@
           else if (text !== "ORDER NOTES") productLines.push(text);
         });
         const extractedProduct = productLines.join(" ").trim();
+        const catalogMatches = getCatalogProductMatches(extractedProduct);
         const catalogProduct = getCatalogProduct(extractedProduct);
-        const product = catalogProduct?.product || extractedProduct;
+        const catalogChoices = getCatalogMatchChoices(extractedProduct).map((item) => item.product);
+        const catalogNames = [...new Set(catalogMatches.map((item) => item.product))];
+        const product = catalogProduct?.product || (catalogNames.length === 1 ? catalogNames[0] : extractedProduct);
         if (!product) throw new Error("A product description could not be read from the PDF.");
         if (isTileProduct(product)) {
           tileUnits.forEach((unit) => {
@@ -2857,6 +3036,7 @@
           product,
           ordered: orderedMatch ? Number(orderedMatch[1]) : "",
           quantities,
+          catalogChoices,
           qtyItem: catalogProduct?.qtyItems?.length === 1
             ? catalogProduct.qtyItems[0]
             : ""
@@ -2997,7 +3177,7 @@
         const productItems = line.items.filter((item) => item.x < orderedStart);
         const lineText = productItems.map((item) => item.text).join(" ").trim();
         if (isDeliverySlipPlaceholder(lineText)) return;
-        const code = productItems.map((item) => item.text).join(" ").match(/^\s*\[([^\]]+)\]/)?.[1];
+        const code = extractCatalogCode(productItems.map((item) => item.text).join(" "));
         if (code) rows.push({ code, lines: [{ line, productItems }] });
         else if (rows.length && productItems.length) rows[rows.length - 1].lines.push({ line, productItems });
       });
@@ -3006,15 +3186,28 @@
         const firstLine = row.lines[0].line;
         const orderQuantity = readDeliveryQuantity(firstLine.items, orderedStart, deliveredStart, "PCS");
         const deliveredQuantity = readDeliveryQuantity(firstLine.items, deliveredStart, Number.POSITIVE_INFINITY, orderQuantity.unit);
-        const catalogProduct = productsByCode.get(row.code.toLocaleLowerCase());
+        const catalogMatches = getCatalogProductsByCode(row.code);
         const descriptions = row.lines.map(({ productItems }) =>
           productItems.map((item) => item.text).join(" ").trim()
         ).filter(Boolean);
         const product = descriptions.join(" ").replace(/\s+/g, " ").trim();
+        const normalizedProduct = cleanPdfText(product).toLocaleLowerCase();
+        const exactMatches = catalogMatches.filter((item) =>
+          cleanPdfText(item.product).toLocaleLowerCase() === normalizedProduct
+        );
+        const catalogProduct = exactMatches.length === 1
+          ? exactMatches[0]
+          : exactMatches.length === 0 && catalogMatches.length === 1 ? catalogMatches[0] : undefined;
+        const catalogNames = [...new Set(catalogMatches.map((item) => item.product))];
+        const catalogChoices = catalogMatches.length > 1
+          ? catalogMatches.map((item) => item.product)
+          : [];
+        const selectedProduct = catalogProduct?.product
+          || (catalogNames.length === 1 ? catalogNames[0] : product);
         const qtyItem = catalogProduct?.qtyItems?.length === 1 ? Number(catalogProduct.qtyItems[0]) : NaN;
         let quantities = [{ quantity: deliveredQuantity.quantity, unit: deliveredQuantity.unit }];
-        if (isTileProduct(product)) {
-          const converter = getTileConverter(product, catalogProduct?.qtyItems?.[0]);
+        if (isTileProduct(selectedProduct)) {
+          const converter = getTileConverter(selectedProduct, catalogProduct?.qtyItems?.[0]);
           quantities = converter
             ? convertTileArea(orderQuantity.quantity, converter)
             : tileUnits.map((unit, index) => ({
@@ -3028,9 +3221,10 @@
           }];
         }
         items.push({
-          product,
+          product: selectedProduct,
           ordered: orderQuantity.quantity,
           quantities,
+          catalogChoices,
           qtyItem: catalogProduct?.qtyItems?.length === 1 ? catalogProduct.qtyItems[0] : ""
         });
       });
@@ -3051,10 +3245,25 @@
     };
   }
 
+  function findDuplicateTransferOrder(transferId, excludedOrderId = "") {
+    const normalizedTransferId = String(transferId || "").trim().toLocaleLowerCase();
+    if (!normalizedTransferId) return null;
+    return orders.find((order) => order.id !== excludedOrderId
+      && !order.deletedAt
+      && String(order.transferId || "").trim().toLocaleLowerCase() === normalizedTransferId) || null;
+  }
+
+  function clearPdfImportStatus() {
+    const status = $("#pdf-import-status");
+    status.hidden = true;
+    status.classList.remove("error", "duplicate-warning");
+    status.textContent = "";
+  }
+
   async function importOrderPdf(file) {
     const status = $("#pdf-import-status");
     status.hidden = false;
-    status.classList.remove("error");
+    status.classList.remove("error", "duplicate-warning");
     status.textContent = "Reading order PDF…";
     try {
       const buffer = await file.arrayBuffer();
@@ -3068,7 +3277,9 @@
       const imported = source.includes("CUSTOMER / COMPANY") || source.includes(generatedOrderMarker)
         ? parseGeneratedOrderPdf(buffer)
         : await parseDeliverySlipPdf(buffer);
+      const duplicateTransfer = findDuplicateTransferOrder(imported.transferId);
       resetForm();
+      status.hidden = false;
       form.elements.customer.value = imported.customer;
       form.elements.branch.value = imported.branch || "";
       form.elements.transferId.value = imported.transferId || "";
@@ -3084,8 +3295,14 @@
       refreshPreview();
       setView("new-order");
       $("#order-form-title").textContent = "Review imported order";
-      status.textContent = `Imported ${imported.items.length} item lines. Review the order before saving.`;
-      showToast("PDF imported. Review the order before saving.");
+      if (duplicateTransfer) {
+        status.classList.add("duplicate-warning");
+        status.textContent = `Transfer ID ${imported.transferId} has already been uploaded and saved. You may review the PDF, but this order cannot be saved again.`;
+        showToast(`Transfer ID ${imported.transferId} has already been saved.`);
+      } else {
+        status.textContent = `Imported ${imported.items.length} item lines. Review the order before saving.`;
+        showToast("PDF imported. Review the order before saving.");
+      }
     } catch (error) {
       console.error("Could not import the order PDF.", error);
       status.classList.add("error");
@@ -3141,6 +3358,7 @@
         <div class="item-entry-layout">
           <div class="item-product-row">
             <label class="item-product-field"><span>PRODUCT / DESCRIPTION</span><textarea class="item-input product-input" aria-label="Product description" maxlength="240" rows="2" placeholder="Search warehouse items or type a product">${escapeAttribute(item.product || "")}</textarea></label>
+            <label class="item-catalog-match-field" hidden><span>SELECT CATALOG ITEM — TAKEN WILL BE SUBTRACTED HERE</span><select class="item-input catalog-match-input" aria-label="Catalog item to subtract taken from"></select></label>
             <label class="item-ordered-field"><span>ORDERED</span><input class="item-input ordered-input" aria-label="Ordered" type="number" min="0" step="any" placeholder="0" value="${escapeAttribute(item.ordered ?? "")}"></label>
             <label class="item-qty-item-field"><span>QTY/ITEM</span><span class="qty-item-control"></span></label>
           </div>
@@ -3148,6 +3366,7 @@
         </div>
       </td>
       <td><button class="remove-item" type="button" aria-label="Remove item">×</button></td>`;
+    renderCatalogMatchField(row, item.catalogChoices, item.product);
     renderQtyItemField(row, item.qtyItem);
     renderQuantityFields(row, item, [], { showZero: preserveQuantities });
     row.dataset.preserveImportedQuantities = String(preserveQuantities);
@@ -3158,14 +3377,40 @@
     updateItems();
   }
 
+  function renderCatalogMatchField(row, choices = [], selectedProduct = "") {
+    const field = $(".item-catalog-match-field", row);
+    const select = $(".catalog-match-input", row);
+    const uniqueChoices = [...new Set(choices)];
+    field.hidden = uniqueChoices.length < 2;
+    select.required = uniqueChoices.length > 1;
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.disabled = true;
+    placeholder.textContent = "Choose the product variant";
+    select.replaceChildren(placeholder, ...uniqueChoices.map((product) => {
+      const option = document.createElement("option");
+      option.value = product;
+      option.textContent = product;
+      return option;
+    }));
+    select.value = uniqueChoices.includes(selectedProduct) ? selectedProduct : "";
+  }
+
+  function syncCatalogMatchSelection(row) {
+    const select = $(".catalog-match-input", row);
+    if (!select) return;
+    const product = $(".product-input", row).value.trim();
+    select.value = [...select.options].some((option) => option.value === product) ? product : "";
+  }
+
   function renderQuantityFields(row, item = {}, unitDefaults = [], { showZero = false } = {}) {
     const product = $(".product-input", row).value.trim();
-    const productData = getCatalogProduct(product);
+    const productData = getCatalogProduct(product, item.qtyItem) || getCatalogProductMatches(product)[0];
     const catalogUnit = productData?.unit || units[0];
     const savedQuantities = Array.isArray(item.quantities)
       ? item.quantities
       : [{ quantity: item.quantity, unit: item.unit }];
-    const hasQtyItem = !isTileProduct(product) && Boolean(productData?.qtyItems?.length);
+    const hasQtyItem = !isTileProduct(product) && getCatalogQtyItemOptions(product).length > 0;
     const count = isTileProduct(product) ? 3 : hasQtyItem ? 2 : Math.max(1, savedQuantities.length);
     row.classList.toggle("tile-product", isTileProduct(product));
     $(".quantity-pairs", row).innerHTML = Array.from({ length: count }, (_, index) => {
@@ -3184,11 +3429,10 @@
 
   function renderQtyItemField(row, selectedValue = "") {
     const product = $(".product-input", row).value.trim();
-    const productData = getCatalogProduct(product);
-    const values = productData?.qtyItems || [];
+    const values = getCatalogQtyItemOptions(product);
     const control = $(".qty-item-control", row);
     if (values.length > 1) {
-      const selected = values.includes(String(selectedValue)) ? String(selectedValue) : "";
+      const selected = values.find((value) => sameCatalogQtyItem(value, selectedValue)) || "";
       control.innerHTML = `<select class="item-input qty-item-input" aria-label="QTY/ITEM" required><option value="" disabled${selected ? "" : " selected"}>Choose value</option>${values.map((value) => `<option value="${escapeAttribute(value)}"${value === selected ? " selected" : ""}>${escapeAttribute(value)}</option>`).join("")}</select>`;
     } else {
       const value = values[0] || "";
@@ -3301,7 +3545,7 @@
     const tileQuantities = tileConverter ? convertTileArea(ordered, tileConverter) : null;
     const hasFiriQuantity = !tileProduct
       && quantityInputs.length > 1
-      && getCatalogProduct($(".product-input", row).value)?.qtyItems?.length;
+      && getCatalogProduct($(".product-input", row).value, qtyItemInput.value)?.qtyItems?.length;
     const calculatedQuantity = tileQuantities
       ? tileQuantities[0].quantity
       : hasFiriQuantity
@@ -3366,20 +3610,23 @@
     for (const orderItem of order?.items || []) {
       const ordered = Number(orderItem.ordered);
       if (!Number.isFinite(ordered) || ordered === 0) continue;
-      const catalogItem = getCatalogProduct(orderItem.product);
+      const catalogItem = getCatalogProduct(orderItem.product, orderItem.qtyItem);
       if (!catalogItem) continue;
       if (!Array.isArray(catalogItem.quantities) || !catalogItem.quantities.length) continue;
-      const currentQuantity = Number(catalogItem.quantities[0]);
-      const currentTaken = Number(catalogItem.taken?.[0]);
+      const qtyItemIndex = (catalogItem.qtyItems || [])
+        .findIndex((value) => sameCatalogQtyItem(value, orderItem.qtyItem));
+      const stockIndex = qtyItemIndex >= 0 ? qtyItemIndex : 0;
+      const currentQuantity = Number(catalogItem.quantities[stockIndex]);
+      const currentTaken = Number(catalogItem.taken?.[stockIndex]);
       const previousValue = warehouseTransfer ? currentQuantity : currentTaken;
       const nextValue = (Number.isFinite(previousValue) ? previousValue : 0)
         + (warehouseTransfer ? -ordered : ordered) * multiplier;
       if (warehouseTransfer) {
         catalogItem.quantities = [...catalogItem.quantities];
-        catalogItem.quantities[0] = formatCatalogNumber(nextValue);
+        catalogItem.quantities[stockIndex] = formatCatalogNumber(nextValue);
       } else {
         catalogItem.taken = Array.isArray(catalogItem.taken) ? [...catalogItem.taken] : [];
-        catalogItem.taken[0] = formatCatalogNumber(nextValue);
+        catalogItem.taken[stockIndex] = formatCatalogNumber(nextValue);
       }
       recalculateCatalogProduct(catalogItem);
       changes.push({
@@ -3387,12 +3634,13 @@
         productId: catalogItem.product.match(/^\s*\[([^\]]+)\]/)?.[1] || catalogItem.product,
         ordered: ordered * multiplier,
         movement: warehouseTransfer ? "Quantity" : "Taken",
+        qtyItem: catalogItem.qtyItems?.[stockIndex] || "",
         previousValue: Number.isFinite(previousValue) ? previousValue : 0,
-        quantity: catalogItem.quantities[0],
-        taken: catalogItem.taken?.[0],
-        remaining: catalogItem.rQuantities[0],
-        uomN: catalogItem.uomNs[0],
-        status: catalogItem.statuses[0],
+        quantity: catalogItem.quantities[stockIndex],
+        taken: catalogItem.taken?.[stockIndex],
+        remaining: catalogItem.rQuantities[stockIndex],
+        uomN: catalogItem.uomNs[stockIndex],
+        status: catalogItem.statuses[stockIndex],
         warehouseTransfer
       });
     }
@@ -3425,7 +3673,7 @@
         const updatedOrder = { ...order, catalogTakenApplied: true, history: [...order.history] };
         if (catalogChanges.length) {
           const details = catalogChanges.map((change) =>
-            `${change.productId}: Ordered ${formatCatalogNumber(Math.abs(change.ordered))}, ${change.movement} ${formatCatalogNumber(change.movement === "Quantity" ? change.quantity : change.taken)}, R/QUANTITY ${formatCatalogNumber(change.remaining)}, UOM/N ${formatCatalogNumber(change.uomN)}, STS ${change.status}`
+            `${change.productId}${change.qtyItem ? ` (Q/ITEM ${change.qtyItem})` : ""}: Ordered ${formatCatalogNumber(Math.abs(change.ordered))}, ${change.movement} ${formatCatalogNumber(change.movement === "Quantity" ? change.quantity : change.taken)}, R/QUANTITY ${formatCatalogNumber(change.remaining)}, UOM/N ${formatCatalogNumber(change.uomN)}, STS ${change.status}`
           ).join("; ");
           recordOrderHistory(updatedOrder, "Catalog quantities updated", details, { catalogChanges });
         }
@@ -3449,12 +3697,12 @@
 
   function applyCatalogUnit(input) {
     const product = input.value.trim();
-    const item = getCatalogProduct(product);
     const row = input.closest("tr");
     const productChanged = row.dataset.qtyItemProduct !== product.toLocaleLowerCase();
-    const previousQtyItem = row.dataset.qtyItemProduct === product.toLocaleLowerCase()
-      ? $(".qty-item-input", row).value
-      : "";
+    const previousQtyItem = productChanged ? "" : $(".qty-item-input", row).value;
+    const item = getCatalogProduct(product, previousQtyItem)
+      || getCatalogProduct(product)
+      || getCatalogProductMatches(product)[0];
     renderQtyItemField(row, previousQtyItem);
     const previousQuantities = $$(".quantity-pair", row).map((pair) => ({
       quantity: $(".quantity-input", pair).value,
@@ -3469,7 +3717,7 @@
       delete row.dataset.autoCalculatedValues;
     }
     const tileProduct = isTileProduct(product);
-    const hasQtyItem = Boolean(item?.qtyItems?.length);
+    const hasQtyItem = getCatalogQtyItemOptions(product).length > 0;
     const nextCount = tileProduct ? 3 : hasQtyItem ? 2 : 1;
     const currentCount = previousQuantities.length;
     const unitDefaults = tileProduct ? tileUnits
@@ -5039,8 +5287,11 @@
       .filter((order) => order.catalogTakenApplied && !structuredOrderIds.has(order.id))
       .flatMap((order) => order.items.map((item) => {
         const ordered = Number(item.ordered);
-        const catalogItem = getCatalogProduct(item.product);
+        const catalogItem = getCatalogProduct(item.product, item.qtyItem);
         if (!catalogItem || !Number.isFinite(ordered) || ordered === 0) return null;
+        const qtyItemIndex = (catalogItem.qtyItems || [])
+          .findIndex((value) => sameCatalogQtyItem(value, item.qtyItem));
+        const stockIndex = qtyItemIndex >= 0 ? qtyItemIndex : 0;
         return {
           timestamp: order.createdAt,
           orderId: order.id,
@@ -5050,11 +5301,11 @@
           productId: catalogItem.product.match(/^\s*\[([^\]]+)\]/)?.[1] || catalogItem.product,
           ordered,
           movement: isWarehouseTransfer(order) ? "Quantity" : "Taken",
-          quantity: catalogItem.quantities?.[0],
-          taken: catalogItem.taken?.[0],
-          remaining: catalogItem.rQuantities?.[0],
-          uomN: catalogItem.uomNs?.[0],
-          status: catalogItem.statuses?.[0]
+          quantity: catalogItem.quantities?.[stockIndex],
+          taken: catalogItem.taken?.[stockIndex],
+          remaining: catalogItem.rQuantities?.[stockIndex],
+          uomN: catalogItem.uomNs?.[stockIndex],
+          status: catalogItem.statuses?.[stockIndex]
         };
       }).filter(Boolean));
     const entries = [...structuredEntries, ...legacyEntries].filter((entry) =>
@@ -5128,7 +5379,7 @@
         if (!createdAt) return [];
         const ordered = Number(item.ordered);
         if (!Number.isFinite(ordered) || ordered <= 0) return [];
-        const catalogItem = getCatalogProduct(item.product);
+        const catalogItem = getCatalogProduct(item.product, item.qtyItem);
         return [{
           orderId: order.id,
           timestamp: createdAt,
@@ -5353,6 +5604,7 @@
   function resetForm() {
     form.reset();
     editingId = null;
+    clearPdfImportStatus();
     converterPinnedOpen = false;
     form.elements.preparedBy.value = currentPreparedBy;
     $("#order-date").value = dateValue();
@@ -5400,6 +5652,7 @@
     if ($("#new-order-view").classList.contains("active") && !confirmDiscardUnsavedOrder()) return;
     const order = orders.find((entry) => entry.id === id);
     if (!order || order.deletedAt) return;
+    clearPdfImportStatus();
     editingId = id;
     form.elements.customer.value = order.customer;
     form.elements.branch.value = order.branch || "";
@@ -5454,6 +5707,19 @@
 
   async function saveOrder(event) {
     event.preventDefault();
+    const transferId = form.elements.transferId.value.trim();
+    const duplicateTransfer = findDuplicateTransferOrder(transferId, editingId);
+    if (duplicateTransfer) {
+      const message = `Transfer ID ${transferId} is already uploaded and saved. This order was not saved again.`;
+      const status = $("#pdf-import-status");
+      if (!status.hidden) {
+        status.classList.remove("error");
+        status.classList.add("duplicate-warning");
+        status.textContent = message;
+      }
+      showToast(message);
+      return;
+    }
     if (!form.reportValidity()) return;
     if (orderFormSnapshot && currentOrderFormSnapshot() === orderFormSnapshot) {
       showToast("This order has already been saved.");
@@ -5507,9 +5773,9 @@
     order.history = previousOrder ? [...previousOrder.history] : [];
     if (catalogChanged) {
       const historyChanges = new Map();
-      catalogChanges.forEach((change) => historyChanges.set(change.productId, change));
+      catalogChanges.forEach((change) => historyChanges.set(`${change.productId}:${change.qtyItem}`, change));
       const details = [...historyChanges.values()].map((change) =>
-        `${change.productId}: Ordered ${formatCatalogNumber(Math.abs(change.ordered))}, ${change.movement} ${formatCatalogNumber(change.movement === "Quantity" ? change.quantity : change.taken)}, R/QUANTITY ${formatCatalogNumber(change.remaining)}, UOM/N ${formatCatalogNumber(change.uomN)}, STS ${change.status}`
+        `${change.productId}${change.qtyItem ? ` (Q/ITEM ${change.qtyItem})` : ""}: Ordered ${formatCatalogNumber(Math.abs(change.ordered))}, ${change.movement} ${formatCatalogNumber(change.movement === "Quantity" ? change.quantity : change.taken)}, R/QUANTITY ${formatCatalogNumber(change.remaining)}, UOM/N ${formatCatalogNumber(change.uomN)}, STS ${change.status}`
       ).join("; ");
       recordOrderHistory(order, "Catalog quantities updated", details, {
         catalogChanges: orderCatalogChanges
@@ -5844,6 +6110,18 @@
     if (file) importOrderPdf(file);
     event.target.value = "";
   });
+  form.elements.transferId.addEventListener("input", () => {
+    const status = $("#pdf-import-status");
+    if (!status.classList.contains("duplicate-warning")) return;
+    const transferId = form.elements.transferId.value.trim();
+    const duplicateTransfer = findDuplicateTransferOrder(transferId, editingId);
+    if (duplicateTransfer) {
+      status.textContent = `Transfer ID ${transferId} has already been uploaded and saved. You may review the order, but this order cannot be saved again.`;
+      return;
+    }
+    status.classList.remove("duplicate-warning");
+    status.textContent = "Transfer ID changed. Review the order before saving.";
+  });
   $("#add-item").addEventListener("click", () => createItemRow());
   $("#converter-mode").addEventListener("change", updateConverter);
   $("#converter-area").addEventListener("input", updateConverter);
@@ -5854,7 +6132,10 @@
     if (converterPinnedOpen) $("#converter-panel").scrollIntoView({ behavior: "smooth", block: "start" });
   });
   itemsBody.addEventListener("input", (event) => {
-    if (event.target.matches(".product-input")) applyCatalogUnit(event.target);
+    if (event.target.matches(".product-input")) {
+      syncCatalogMatchSelection(event.target.closest("tr"));
+      applyCatalogUnit(event.target);
+    }
     if (event.target.matches(".ordered-input")) calculateOrderedQuantity(event.target.closest("tr"));
     if (event.target.matches(".quantity-input")) {
       const row = event.target.closest("tr");
@@ -5868,7 +6149,18 @@
     updateItems();
   });
   itemsBody.addEventListener("change", (event) => {
-    if (event.target.matches(".product-input")) applyCatalogUnit(event.target);
+    if (event.target.matches(".catalog-match-input")) {
+      const row = event.target.closest("tr");
+      const productInput = $(".product-input", row);
+      productInput.value = event.target.value;
+      applyCatalogUnit(productInput);
+      if ($(".qty-item-input", row).value) calculateOrderedQuantity(row);
+    } else if (event.target.matches(".qty-item-input")) {
+      applyCatalogUnit($(".product-input", event.target.closest("tr")));
+    } else if (event.target.matches(".product-input")) {
+      syncCatalogMatchSelection(event.target.closest("tr"));
+      applyCatalogUnit(event.target);
+    }
     if (event.target.matches(".ordered-input, .qty-item-input")) calculateOrderedQuantity(event.target.closest("tr"));
     updateItems();
   });
@@ -5886,6 +6178,7 @@
     if (itemsBody.children.length === 1) {
       const row = itemsBody.firstElementChild;
       row.classList.remove("conversion-insertion-target");
+      renderCatalogMatchField(row);
       $$(".item-input", row).forEach((input) => { input.value = input.tagName === "SELECT" ? units[0] : ""; });
     } else button.closest("tr").remove();
     updateItemIndexes();
@@ -6102,6 +6395,11 @@
       syncSourceData();
       window.setInterval(() => syncSourceData(), 3000);
     }
+  }
+
+  if ("serviceWorker" in navigator && location.protocol !== "file:") {
+    navigator.serviceWorker.register("service-worker.js")
+      .catch((error) => console.warn("Could not enable offline app caching.", error));
   }
 
   if (cloudDeployment) {

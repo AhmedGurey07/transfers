@@ -1,4 +1,4 @@
-const CACHE_NAME = "shaafici-order-desk-v25";
+const CACHE_NAME = "shaafici-order-desk-v26";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -8,7 +8,7 @@ const APP_SHELL = [
   "./vendor/pdfjs/pdf.min.js",
   "./vendor/pdfjs/pdf.worker.min.js",
   "./vendor/html2canvas/html2canvas.min.js",
-  "./app.js?v=202611170017",
+  "./app.js?v=202611170018",
   "./manifest.webmanifest",
   "./shaafici-warehouse-200-logo.png",
   "./shaafici-app-icon.png"
@@ -44,7 +44,8 @@ self.addEventListener("fetch", (event) => {
   const scopePath = new URL(self.registration.scope).pathname;
   const cachedExternalScript = [
     "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
-    "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"
+    "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js",
+    "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"
   ].includes(url.href);
   const withinAppScope = url.origin === self.location.origin
     && url.pathname.startsWith(scopePath)

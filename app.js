@@ -4840,11 +4840,17 @@
     receiptScreenshotCacheKey = cacheKey;
     const screenshotPromise = Promise.resolve().then(async () => {
       if (typeof window.html2canvas !== "function") {
-        await loadExternalScript(new URL("vendor/html2canvas/html2canvas.min.js", location.href).href);
+        const bundledScript = new URL("vendor/html2canvas/html2canvas.min.js", location.href).href;
+        try {
+          await loadExternalScript(bundledScript);
+        } catch (error) {
+          console.warn("Could not load the bundled receipt screenshot library; trying the CDN copy.", error);
+          await loadExternalScript("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js");
+        }
       }
       const screenshotter = window.html2canvas;
       if (typeof screenshotter !== "function") {
-        throw new Error("The receipt screenshot library did not initialize. Check that the site includes vendor/html2canvas/html2canvas.min.js.");
+        throw new Error("The receipt screenshot library did not initialize. Check your internet connection and try again.");
       }
       const canvas = await screenshotter(sheet, {
         backgroundColor: "#fff",

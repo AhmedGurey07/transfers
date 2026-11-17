@@ -2574,6 +2574,9 @@
   let needsMoneyDataCleanup = false;
   let orders = [];
   let drivers = [];
+  let driversDirectoryVisible = false;
+  let selectedShaaficiDriverPhone = "";
+  let selectedShaaficiOrderIndex = 0;
   let editingId = null;
   let orderSort = { key: "createdAt", direction: "desc" };
   let historyOrderFilter = "";
@@ -2582,6 +2585,8 @@
   let printPreviewOrder = null;
   let printPreviewReturnView = "new-order";
   let printPreviewPdfUrl = null;
+  let receiptScreenshotPromise = null;
+  let receiptScreenshotCacheKey = "";
   let printLayout = "full-page";
   let toastTimer;
   function loadOrders(savedValue) {
@@ -2754,10 +2759,223 @@
     return true;
   }
 
+  function renderDriverDirectory() {
+    const list = $("#drivers-directory-list");
+    const query = $("#drivers-directory-search").value.trim().toLocaleLowerCase();
+    const matchingDrivers = drivers.filter((driver) =>
+      `${driver.name} ${driver.phone}`.toLocaleLowerCase().includes(query)
+    );
+    list.replaceChildren();
+    sortDriversByOrderCount(matchingDrivers).forEach((driver) => {
+      const row = document.createElement("tr");
+      const nameCell = document.createElement("td");
+      const phoneCell = document.createElement("td");
+      nameCell.textContent = driver.name;
+      phoneCell.textContent = driver.phone;
+      row.append(nameCell, phoneCell);
+      list.append(row);
+    });
+    $("#drivers-directory-count").textContent = query
+      ? `${matchingDrivers.length} of ${drivers.length} ${drivers.length === 1 ? "driver" : "drivers"} found`
+      : drivers.length
+        ? `${drivers.length} ${drivers.length === 1 ? "driver" : "drivers"} saved`
+      : "No drivers saved yet.";
+    $("#drivers-directory-search-wrap").hidden = !driversDirectoryVisible || drivers.length === 0;
+    $("#drivers-directory-table").hidden = !driversDirectoryVisible || matchingDrivers.length === 0;
+    $("#drivers-directory-empty").hidden = !driversDirectoryVisible || matchingDrivers.length > 0;
+    $("#drivers-directory-empty strong").textContent = drivers.length
+      ? "No matching drivers"
+      : "No drivers saved yet";
+    $("#drivers-directory-empty span").textContent = drivers.length
+      ? "Try a different name or phone number."
+      : "Add a driver to make them available in order forms.";
+    $("#toggle-driver-directory").textContent = driversDirectoryVisible ? "Hide drivers" : "View drivers";
+    $("#toggle-driver-directory").setAttribute("aria-expanded", String(driversDirectoryVisible));
+  }
+
+  function getDriverDateRange() {
+    const period = $("#shaafici-driver-period").value;
+    const dateInput = $("#shaafici-driver-date");
+    if (!dateInput.value) dateInput.value = dateValue();
+    dateInput.disabled = period === "all";
+
+    if (period === "all") {
+      $("#shaafici-driver-period-summary").textContent = "All time";
+      return null;
+    }
+
+    const referenceDate = new Date(`${dateInput.value}T00:00:00`);
+    const start = new Date(referenceDate);
+    const end = new Date(referenceDate);
+    if (period === "week") {
+      const daysSinceMonday = (start.getDay() + 6) % 7;
+      start.setDate(start.getDate() - daysSinceMonday);
+      end.setTime(start.getTime());
+      end.setDate(start.getDate() + 6);
+    } else if (period === "month") {
+      start.setDate(1);
+      end.setFullYear(end.getFullYear(), end.getMonth() + 1, 0);
+    } else if (period === "year") {
+      start.setMonth(0, 1);
+      end.setMonth(11, 31);
+    }
+
+    const range = { startDate: dateValue(start), endDate: dateValue(end) };
+    const rangeLabel = period === "day"
+      ? `Orders on ${formatDate(range.startDate)}`
+      : period === "week"
+        ? `Week of ${formatDate(range.startDate)} – ${formatDate(range.endDate)}`
+        : period === "month"
+          ? `Orders in ${referenceDate.toLocaleDateString("en", { month: "long", year: "numeric" })}`
+          : `Orders in ${referenceDate.getFullYear()}`;
+    $("#shaafici-driver-period-summary").textContent = rangeLabel;
+    return range;
+  }
+
+  function getOrderDateForDriverFilter(order) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(order.date)) return order.date;
+    const createdAt = Number(order.createdAt);
+    return createdAt ? dateValue(new Date(createdAt)) : "";
+  }
+
+  function getOrdersForDriver(driver, dateRange = null) {
+    const driverName = driver.name.trim().toLocaleLowerCase();
+    const driverPhone = driver.phone.trim();
+    return orders.filter((order) => {
+      if (order.deletedAt) return false;
+      const assignedToDriver = order.driver.trim().toLocaleLowerCase() === driverName
+        || Boolean(driverPhone && order.driverPhone.trim() === driverPhone);
+      if (!assignedToDriver || !dateRange) return assignedToDriver;
+      const orderDate = getOrderDateForDriverFilter(order);
+      return orderDate >= dateRange.startDate && orderDate <= dateRange.endDate;
+    }).sort((left, right) => (Number(right.createdAt) || 0) - (Number(left.createdAt) || 0));
+  }
+
+  function sortDriversByOrderCount(driverList, dateRange = null) {
+    return driverList
+      .map((driver, index) => ({
+        driver,
+        index,
+        orderCount: getOrdersForDriver(driver, dateRange).length
+      }))
+      .sort((left, right) => right.orderCount - left.orderCount || left.index - right.index)
+      .map(({ driver }) => driver);
+  }
+
+  function renderShaaficiDrivers() {
+    const options = $("#shaafici-driver-options");
+    const optionsEmpty = $("#shaafici-driver-options-empty");
+    const orderEmpty = $("#shaafici-driver-order-empty");
+    const orderDetails = $("#shaafici-driver-order-details");
+    const query = $("#shaafici-driver-search").value.trim().toLocaleLowerCase();
+    const dateRange = getDriverDateRange();
+    const orderedDrivers = sortDriversByOrderCount(drivers.filter((driver) =>
+      `${driver.name} ${driver.phone}`.toLocaleLowerCase().includes(query)
+    ), dateRange);
+    options.replaceChildren();
+    optionsEmpty.hidden = orderedDrivers.length > 0;
+    $("#shaafici-driver-options-empty strong").textContent = drivers.length
+      ? "No matching drivers"
+      : "No saved drivers";
+    $("#shaafici-driver-options-empty span").textContent = drivers.length
+      ? "Try a different name or phone number."
+      : "Add a driver above to get started.";
+
+    if (!orderedDrivers.some((driver) => driver.phone === selectedShaaficiDriverPhone)) {
+      selectedShaaficiDriverPhone = orderedDrivers[0]?.phone || "";
+      selectedShaaficiOrderIndex = 0;
+    }
+
+    orderedDrivers.forEach((driver) => {
+      const driverOrders = getOrdersForDriver(driver, dateRange);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "shaafici-driver-option";
+      button.classList.toggle("active", driver.phone === selectedShaaficiDriverPhone);
+      button.setAttribute("aria-pressed", String(driver.phone === selectedShaaficiDriverPhone));
+
+      const identity = document.createElement("span");
+      identity.className = "shaafici-driver-identity";
+      const name = document.createElement("strong");
+      name.textContent = driver.name;
+      const phone = document.createElement("small");
+      phone.textContent = driver.phone;
+      identity.append(name, phone);
+
+      const orderCount = document.createElement("span");
+      orderCount.className = "shaafici-driver-order-total";
+      orderCount.textContent = `${driverOrders.length} ${driverOrders.length === 1 ? "order" : "orders"}`;
+      button.append(identity, orderCount);
+      button.addEventListener("click", () => {
+        selectedShaaficiDriverPhone = driver.phone;
+        selectedShaaficiOrderIndex = 0;
+        renderShaaficiDrivers();
+      });
+      options.append(button);
+    });
+
+    const selectedDriver = orderedDrivers.find((driver) => driver.phone === selectedShaaficiDriverPhone);
+    if (!selectedDriver) {
+      orderDetails.hidden = true;
+      orderEmpty.hidden = false;
+      orderEmpty.textContent = drivers.length
+        ? query ? "No drivers match your search." : "Choose a driver to see their orders."
+        : "Add a driver above to get started.";
+      return;
+    }
+
+    const driverOrders = getOrdersForDriver(selectedDriver, dateRange);
+    if (!driverOrders.length) {
+      orderDetails.hidden = true;
+      orderEmpty.hidden = false;
+      orderEmpty.textContent = dateRange
+        ? `${selectedDriver.name} has no orders in this period.`
+        : `${selectedDriver.name} has no saved orders yet.`;
+      return;
+    }
+
+    selectedShaaficiOrderIndex = Math.min(selectedShaaficiOrderIndex, driverOrders.length - 1);
+    const order = driverOrders[selectedShaaficiOrderIndex];
+    orderEmpty.hidden = true;
+    orderDetails.hidden = false;
+    $("#shaafici-driver-order-title").textContent = `${selectedDriver.name} — ${selectedDriver.phone}`;
+    $("#shaafici-driver-order-count").textContent = `${driverOrders.length} ${driverOrders.length === 1 ? "order" : "orders"} ${dateRange ? "in selected period" : "assigned"}`;
+    $("#shaafici-order-number").textContent = order.id || "—";
+    $("#shaafici-order-date").textContent = formatDate(order.date);
+    $("#shaafici-order-customer").textContent = order.customer || "—";
+    $("#shaafici-order-branch").textContent = order.branch || "—";
+    $("#shaafici-order-transfer").textContent = order.transferId || "—";
+    $("#shaafici-order-status").textContent = order.status || "—";
+    $("#shaafici-order-position").textContent = `Order ${selectedShaaficiOrderIndex + 1} of ${driverOrders.length}`;
+
+    const items = $("#shaafici-order-items");
+    items.replaceChildren();
+    order.items.forEach((item) => {
+      const line = document.createElement("li");
+      const product = document.createElement("strong");
+      product.textContent = item.product || "Unnamed item";
+      const quantities = Array.isArray(item.quantities)
+        ? item.quantities
+          .filter((quantity) => Number(quantity.quantity) > 0)
+          .map((quantity) => `${quantity.quantity} ${quantity.unit || ""}`.trim())
+        : Number(item.quantity) > 0 ? [`${item.quantity} ${item.unit || ""}`.trim()] : [];
+      const details = document.createElement("span");
+      const ordered = item.ordered ? `Ordered: ${item.ordered}` : "";
+      details.textContent = [ordered, ...quantities].filter(Boolean).join(" · ") || "No quantity entered";
+      line.append(product, details);
+      items.append(line);
+    });
+
+    $("#shaafici-order-previous").disabled = selectedShaaficiOrderIndex === 0;
+    $("#shaafici-order-next").disabled = selectedShaaficiOrderIndex >= driverOrders.length - 1;
+  }
+
   function renderSavedDrivers() {
     $("#drivers-status").textContent = drivers.length
       ? `${drivers.length} ${drivers.length === 1 ? "driver" : "drivers"} saved`
       : "No drivers saved yet.";
+    renderDriverDirectory();
+    if (!$("#shaafici-driver-panel").hidden) renderShaaficiDrivers();
     const suggestions = $("#saved-driver-options");
     if (!suggestions.hidden) renderDriverSuggestions($("#order-driver").value);
   }
@@ -2776,7 +2994,7 @@
       empty.textContent = drivers.length ? "No matching saved drivers." : "No saved drivers yet.";
       list.append(empty);
     } else {
-      matchingDrivers.forEach((driver) => {
+      sortDriversByOrderCount(matchingDrivers).forEach((driver) => {
         const option = document.createElement("button");
         option.type = "button";
         option.className = "driver-suggestion";
@@ -2812,9 +3030,9 @@
     if (driver) $("#driver-phone").value = driver.phone;
   }
 
-  async function saveDriver() {
-    const name = $("#saved-driver-name").value.trim();
-    const phone = $("#saved-driver-phone").value.trim();
+  async function saveDriver(nameInput, phoneInput, assignToOrder = false) {
+    const name = nameInput.value.trim();
+    const phone = phoneInput.value.trim();
     if (!name || !phone) {
       showToast("Enter both a driver name and phone number.");
       return;
@@ -2826,7 +3044,7 @@
       return;
     }
     const previousDrivers = drivers;
-    drivers.push({ name, phone });
+    drivers = [...drivers, { name, phone }];
     if (!await persistDrivers()) {
       drivers = previousDrivers;
       renderSavedDrivers();
@@ -2834,11 +3052,13 @@
     }
 
     renderSavedDrivers();
-    $("#order-driver").value = name;
-    $("#driver-phone").value = phone;
-    $("#saved-driver-name").value = "";
-    $("#saved-driver-phone").value = "";
-    refreshPreview();
+    nameInput.value = "";
+    phoneInput.value = "";
+    if (assignToOrder) {
+      $("#order-driver").value = name;
+      $("#driver-phone").value = phone;
+      refreshPreview();
+    }
     showToast("Driver saved for future orders.");
   }
 
@@ -3325,7 +3545,7 @@
     $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${name}-view`));
     $$("[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === name));
     $("#app-back-button").hidden = name === "overview";
-    const labels = { overview: "Overview", orders: "All orders", catalog: "Product catalog", history: "User activity log", notifications: "Notifications", reports: "Reports", "transfer-history": "Transfer history", "item-history": "Item history", "returned-tiles": "Returned tiles", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
+    const labels = { overview: "Overview", orders: "All orders", catalog: "Product catalog", history: "User activity log", notifications: "Notifications", reports: "Reports", "transfer-history": "Transfer history", "item-history": "Item history", "returned-tiles": "Returned tiles", drivers: "Drivers", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
     $("#breadcrumb-current").textContent = labels[name] || "Overview";
     if (name === "orders") renderAllOrders();
     if (name === "history") renderHistory();
@@ -3335,6 +3555,10 @@
     if (name === "transfer-history") renderTransferHistory();
     if (name === "item-history") renderItemHistory();
     if (name === "returned-tiles") renderReturnedTiles();
+    if (name === "drivers") {
+      renderDriverDirectory();
+      if (!$("#shaafici-driver-panel").hidden) renderShaaficiDrivers();
+    }
     if (name === "overview") renderOverview();
     if (name === "users" && ["owner", "admin"].includes(cloudRole)) loadWorkspaceUsers();
     if (name === "profile") prepareProfileForm();
@@ -3890,6 +4114,8 @@
   }
 
   function renderPrintPreview(order) {
+    receiptScreenshotPromise = null;
+    receiptScreenshotCacheKey = "";
     printPreviewOrder = order;
     $("#paper-order-id").textContent = order.id;
     $("#paper-customer").textContent = order.customer || "—";
@@ -3944,6 +4170,7 @@
     $("#print-layout-help").textContent = layout === "receipt"
       ? "Each product appears above its quantities and units. Select the Epson 80 mm receipt roll and 100% scale."
       : "Full-page layout for the HP LaserJet M109-M112. Choose that printer in the print dialog.";
+    if (layout === "receipt") requestAnimationFrame(prepareReceiptScreenshot);
   }
 
   function closePrintPreview() {
@@ -4219,7 +4446,7 @@
   }
 
   async function takeReceiptScreenshot() {
-    return takeReceiptScreenshotReceiptCanvas();
+    return takeReceiptScreenshotReceiptPreview();
 
     /*
     if (!printPreviewOrder) throw new Error("There is no order to capture.");
@@ -4492,189 +4719,69 @@
     */
   }
 
-  async function takeReceiptScreenshotReceiptCanvas() {
+  function getReceiptScreenshotBlob() {
+    if (!printPreviewOrder) throw new Error("There is no order to capture.");
+    if (typeof html2canvas !== "function") throw new Error("Could not load receipt screenshot support. Refresh the page and try again.");
+    const sheet = $(".print-sheet");
+    if (!sheet) throw new Error("The Epson receipt preview is unavailable.");
+    const bounds = sheet.getBoundingClientRect();
+    const cacheKey = `${printPreviewOrder.id}:${bounds.width}:${bounds.height}`;
+    if (receiptScreenshotPromise && receiptScreenshotCacheKey === cacheKey) return receiptScreenshotPromise;
+
+    receiptScreenshotCacheKey = cacheKey;
+    const screenshotPromise = html2canvas(sheet, {
+      backgroundColor: "#fff",
+      scale: 2,
+      logging: false,
+      onclone: (captureDocument) => {
+        captureDocument.querySelector("#take-receipt-screenshot")?.remove();
+        captureDocument.querySelector(".print-sheet-header")?.remove();
+        captureDocument.querySelector(".print-sheet-rule")?.remove();
+        captureDocument.querySelectorAll(".print-item-product").forEach((product) => {
+          if (!/[\u0590-\u08ff]/.test(product.textContent || "")) {
+            product.style.direction = "ltr";
+            product.style.unicodeBidi = "normal";
+          }
+        });
+        captureDocument.querySelectorAll(".print-item-ordered").forEach((ordered) => {
+          ordered.style.direction = "ltr";
+          ordered.style.unicodeBidi = "normal";
+        });
+      }
+    }).then((canvas) => new Promise((resolve, reject) => {
+      if (canvas.width > 32767 || canvas.height > 32767) {
+        reject(new Error("This receipt is too large to capture as one image."));
+        return;
+      }
+      canvas.toBlob((blob) => blob
+        ? resolve(blob)
+        : reject(new Error("Could not encode the screenshot image.")), "image/png");
+    })).catch((error) => {
+      if (receiptScreenshotPromise === screenshotPromise) {
+        receiptScreenshotPromise = null;
+        receiptScreenshotCacheKey = "";
+      }
+      throw error;
+    });
+    receiptScreenshotPromise = screenshotPromise;
+    return screenshotPromise;
+  }
+
+  function prepareReceiptScreenshot() {
+    if (!printPreviewOrder || printLayout !== "receipt") return;
+    getReceiptScreenshotBlob().catch((error) => {
+      console.error("Could not pre-capture the Epson receipt.", error);
+    });
+  }
+
+  async function takeReceiptScreenshotReceiptPreview() {
     if (!printPreviewOrder) throw new Error("There is no order to capture.");
     if (!navigator.clipboard?.write || typeof ClipboardItem !== "function") {
       throw new Error("Image clipboard access is unavailable. Allow clipboard access in Firefox, then try again.");
     }
+    if (printLayout !== "receipt") setPrintLayout("receipt");
 
-    const order = printPreviewOrder;
-    const width = 302;
-    const scale = 2;
-    const padding = 12;
-    const contentWidth = width - padding * 2;
-    const canvas = document.createElement("canvas");
-    const measure = canvas.getContext("2d");
-    if (!measure) throw new Error("Could not create the screenshot image.");
-
-    const wrap = (value, font, maxWidth) => {
-      measure.font = font;
-      const lines = [];
-      let line = "";
-      String(value || "-").split(/\s+/).forEach((word) => {
-        const candidate = line ? `${line} ${word}` : word;
-        if (line && measure.measureText(candidate).width > maxWidth) {
-          lines.push(line);
-          line = word;
-        } else {
-          line = candidate;
-        }
-      });
-      if (line) lines.push(line);
-      return lines;
-    };
-
-    const fields = [
-      ["ORDER DATE", formatDate(order.date)],
-      ["CUSTOMER / COMPANY", order.customer],
-      ["DELIVERED BY", order.driver],
-      ["BRANCH", order.branch],
-      ["DRIVER PHONE", order.driverPhone],
-      ["TRANSFER ID", order.transferId]
-    ].filter(([, value]) => value);
-    const columnGap = 10;
-    const columnWidth = (contentWidth - columnGap) / 2;
-    const fieldRows = [];
-    for (let index = 0; index < fields.length; index += 2) {
-      const row = fields.slice(index, index + 2).map(([label, value]) => ({
-        label,
-        lines: wrap(value, "600 12px Arial", columnWidth - 8)
-      }));
-      fieldRows.push({
-        fields: row,
-        height: Math.max(...row.map((field) => 11 + field.lines.length * 15 + 3))
-      });
-    }
-
-    const itemRows = order.items.map((item, index) => {
-      const productLines = wrap(item.product, "600 13px Arial", contentWidth - 76).slice(0, 2);
-      const orderedLines = item.ordered === "" || item.ordered == null
-        ? []
-        : wrap(String(item.ordered), "9px Arial", contentWidth - 76).slice(0, 1);
-      const quantities = (item.quantities || [{ quantity: item.quantity, unit: item.unit }])
-        .filter((pair) => Number(pair.quantity) > 0)
-        .map((pair) => `${pair.quantity} ${pair.unit}`)
-        .join(" · ") || "No quantity";
-      const tile = isTileProduct(item.product);
-      const quantityLines = wrap(quantities, "600 11px Arial", tile ? 82 : 58);
-      return {
-        index: index + 1,
-        tile,
-        productLines,
-        orderedLines,
-        quantityLines,
-        height: tile
-          ? productLines.length * 17 + orderedLines.length * 13 + quantityLines.length * 15 + 18
-          : Math.max(productLines.length * 17 + orderedLines.length * 13, quantities.length ? 17 : 0) + 14
-      };
-    });
-
-    let height = 16;
-    fieldRows.forEach((row) => { height += Math.max(row.height, 45) + 18; });
-    height += 6 + 26;
-    itemRows.forEach((row) => { height += row.height; });
-    if (order.notes) height += 10 + wrap(`Notes: ${order.notes}`, "11px Arial", contentWidth).length * 15;
-    if (order.preparedBy) height += 20 + 11 + 4 + wrap(order.preparedBy, "600 11px Arial", contentWidth).length * 14;
-    height += 8;
-    if (height * scale > 32767) throw new Error("This receipt is too long to capture as one image.");
-
-    canvas.width = width * scale;
-    canvas.height = Math.ceil(height * scale);
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Could not create the screenshot image.");
-    context.scale(scale, scale);
-    context.fillStyle = "#fff";
-    context.fillRect(0, 0, width, height);
-    context.textBaseline = "top";
-    let y = 12;
-
-    fieldRows.forEach((row) => {
-      row.fields.forEach((field, index) => {
-        const x = padding + index * (columnWidth + columnGap);
-        context.textAlign = "center";
-        context.fillStyle = "#333";
-        context.font = "700 8px Arial";
-        context.fillText(field.label, x + columnWidth / 2, y);
-        context.fillStyle = "#111";
-        context.font = "600 12px Arial";
-        field.lines.forEach((line, lineIndex) => {
-          context.fillText(line, x + columnWidth / 2, y + 14 + lineIndex * 15);
-        });
-      });
-      y += Math.max(row.height, 45) + 18;
-    });
-
-    context.fillStyle = "#f0f0f0";
-    context.fillRect(padding, y, contentWidth, 26);
-    context.fillStyle = "#111";
-    context.font = "700 8px Arial";
-    context.textAlign = "center";
-    context.fillText("#", padding + 11, y + 8);
-    context.textAlign = "left";
-    context.fillText("PRODUCT / DESCRIPTION", padding + 24, y + 8);
-    y += 26;
-
-    itemRows.forEach((row) => {
-      const rowTop = y;
-      context.fillStyle = "#111";
-      context.font = "500 10px Arial";
-      context.textAlign = "center";
-      context.fillText(String(row.index), padding + 11, rowTop + 8);
-      context.textAlign = "left";
-      context.font = "600 13px Arial";
-      if (row.tile) {
-        let itemY = rowTop + 8;
-        context.textAlign = "center";
-        row.productLines.forEach((line, index) => context.fillText(line, width / 2, itemY + index * 17));
-        itemY += row.productLines.length * 17;
-        context.fillStyle = "#333";
-        context.font = "9px Arial";
-        row.orderedLines.forEach((line, index) => context.fillText(line, width / 2, itemY + index * 13));
-        itemY += row.orderedLines.length * 13;
-        context.fillStyle = "#111";
-        context.font = "600 11px Arial";
-        row.quantityLines.forEach((line, index) => context.fillText(line, width / 2, itemY + 5 + index * 15));
-      } else {
-        row.productLines.forEach((line, index) => context.fillText(line, padding + 24, rowTop + 8 + index * 17));
-        context.fillStyle = "#333";
-        context.font = "9px Arial";
-        row.orderedLines.forEach((line, index) => context.fillText(line, padding + 24, rowTop + 8 + row.productLines.length * 17 + index * 13));
-        context.fillStyle = "#111";
-        context.font = "600 11px Arial";
-        context.textAlign = "right";
-        row.quantityLines.forEach((line, index) => context.fillText(line, width - padding - 4, rowTop + 8 + index * 15));
-      }
-      context.fillStyle = "#777";
-      context.fillRect(padding, rowTop + row.height - 1, contentWidth, 1);
-      y += row.height;
-    });
-
-    if (order.notes) {
-      y += 10;
-      context.fillStyle = "#111";
-      context.font = "11px Arial";
-      context.textAlign = "left";
-      wrap(`Notes: ${order.notes}`, "11px Arial", contentWidth)
-        .forEach((line, index) => context.fillText(line, padding, y + index * 15));
-    }
-    if (order.preparedBy) {
-      y += order.notes ? 20 : 10;
-      context.fillStyle = "#777";
-      context.fillRect(padding, y, contentWidth, 1);
-      y += 12;
-      context.fillStyle = "#777";
-      context.font = "700 8px Arial";
-      context.textAlign = "right";
-      context.fillText("CREATED BY", width - padding, y);
-      context.fillStyle = "#111";
-      context.font = "600 11px Arial";
-      wrap(order.preparedBy, "600 11px Arial", contentWidth)
-        .forEach((line, index) => context.fillText(line, width - padding, y + 15 + index * 14));
-    }
-
-    const png = new Promise((resolve, reject) => {
-      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not encode the screenshot image.")), "image/png");
-    });
+    const png = getReceiptScreenshotBlob();
     await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
     return true;
   }
@@ -6079,7 +6186,42 @@
     if (file) importOnlineBackup(file);
     event.target.value = "";
   });
-  $("#save-driver").addEventListener("click", saveDriver);
+  $("#save-driver").addEventListener("click", () => {
+    saveDriver($("#saved-driver-name"), $("#saved-driver-phone"), true);
+  });
+  $("#drivers-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveDriver($("#drivers-page-name"), $("#drivers-page-phone"));
+  });
+  $("#toggle-driver-directory").addEventListener("click", () => {
+    driversDirectoryVisible = !driversDirectoryVisible;
+    renderDriverDirectory();
+  });
+  $("#drivers-directory-search").addEventListener("input", renderDriverDirectory);
+  $("#show-shaafici-drivers").addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    const panel = $("#shaafici-driver-panel");
+    panel.hidden = !panel.hidden;
+    button.setAttribute("aria-expanded", String(!panel.hidden));
+    if (!panel.hidden) renderShaaficiDrivers();
+  });
+  $("#shaafici-order-previous").addEventListener("click", () => {
+    selectedShaaficiOrderIndex = Math.max(0, selectedShaaficiOrderIndex - 1);
+    renderShaaficiDrivers();
+  });
+  $("#shaafici-order-next").addEventListener("click", () => {
+    const driver = drivers.find((entry) => entry.phone === selectedShaaficiDriverPhone);
+    if (!driver) return;
+    const driverOrders = getOrdersForDriver(driver, getDriverDateRange());
+    selectedShaaficiOrderIndex = Math.min(
+      driverOrders.length - 1,
+      selectedShaaficiOrderIndex + 1
+    );
+    renderShaaficiDrivers();
+  });
+  $("#shaafici-driver-period").addEventListener("change", renderShaaficiDrivers);
+  $("#shaafici-driver-date").addEventListener("change", renderShaaficiDrivers);
+  $("#shaafici-driver-search").addEventListener("input", renderShaaficiDrivers);
   $("#order-driver").addEventListener("focus", () => renderDriverSuggestions($("#order-driver").value));
   $("#order-driver").addEventListener("click", () => renderDriverSuggestions($("#order-driver").value));
   $("#order-driver").addEventListener("input", () => {
@@ -6264,7 +6406,7 @@
   $("#preview-full-page").addEventListener("click", () => setPrintLayout("full-page"));
   $("#take-receipt-screenshot").addEventListener("click", () => {
     takeReceiptScreenshot()
-      .then(() => showToast("Screenshot copied. Paste it into your PDF with Ctrl+V."))
+      .then(() => showToast("Epson receipt screenshot copied. Paste it into your PDF with Ctrl+V."))
       .catch((error) => {
         console.error("Could not take the receipt screenshot.", error);
         showToast(error.name === "NotAllowedError"

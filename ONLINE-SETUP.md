@@ -12,9 +12,9 @@ The GitHub Pages site is static, so it needs a hosted database. This setup uses 
 6. In **Authentication → URL Configuration**, set the Site URL to `https://ahmedgurey07.github.io/transfers/` and add it to the redirect URL allow list.
 7. In **Project Settings → API**, copy the Project URL and the `anon`/publishable key. Never put a `service_role` or secret key in website files.
 
-## 2. Deploy the user-management function
+## 2. Deploy the Edge Functions
 
-The browser cannot safely create or edit Auth users directly. The `supabase/functions/manage-users/index.ts` Edge Function performs those operations using Supabase's server-side service role key, and checks the caller's role on every request.
+The browser cannot safely create or edit Auth users directly. The `manage-users` Edge Function performs those operations using Supabase's server-side service role key, and checks the caller's role on every request. It can create a **Driver** account linked to a saved driver.
 
 From the project folder, use the Supabase CLI:
 
@@ -24,11 +24,14 @@ supabase link --project-ref qkjljlgfiaggkpddzyoc
 supabase functions deploy manage-users
 supabase functions deploy manage-backups
 supabase functions deploy manage-workflows
+supabase functions deploy manage-driver-deliveries
 ```
 
 Supabase provides `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` to Edge Functions. Do not copy the service-role key into `supabase-config.js`, GitHub, or the browser.
 
-All three Edge Functions check workspace roles server-side and use the service-role key only in Supabase. `manage-backups` accepts restore requests from workspace owners/admins and merges records without replacing existing orders, drivers, returns, or matching products. `manage-workflows` lists assignable workspace users for signed-in staff and handles admin-only order/stock approval decisions. The schema also prevents staff from changing approval decisions directly.
+All four Edge Functions check workspace roles server-side and use the service-role key only in Supabase. `manage-backups` accepts restore requests from workspace owners/admins and merges records without replacing existing orders, drivers, returns, or matching products. `manage-workflows` lists assignable workspace users for signed-in staff and handles admin-only order/stock approval decisions. `manage-driver-deliveries` rejects driver write requests because Driver accounts are view-only.
+
+Only the workspace owner can create, edit, or assign Driver accounts. Each Driver account must be linked to a saved driver's phone number. After sign-in, a Driver can open only **Drivers → SHAAFICI Drivers**, and the database limits results to orders assigned to that linked phone number. Drivers cannot create or change orders, read other drivers, or access the catalog, returns, or user list. For an existing Supabase project, rerun the complete `supabase-schema.sql` before deploying these functions; it updates the role constraint and row-level security policies.
 
 The schema also creates the public `profile-photos` Storage bucket. Signed-in users can upload or replace photos only inside their own user-ID folder. Profile photos are publicly readable; do not upload private images.
 
@@ -47,7 +50,7 @@ The website caches its app files and sign-in library after the first visit, and 
 
 ## Existing browser data
 
-The first sign-in on each browser imports its saved orders that are not already online; existing online records win if an order ID already exists. Saved drivers are added if their names are not already present. Keep the old browser data until you verify the migrated orders on the online site.
+The first owner, admin, or staff sign-in on each browser imports its saved orders that are not already online; existing online records win if an order ID already exists. Saved drivers are added if their names are not already present. Driver accounts do not import local browser data. Keep the old browser data until you verify the migrated orders on the online site.
 
 The local source-file sync is provided by `Start Order Desk.cmd`; it reads the warehouse workbook and calculator files for the running local web server.
 

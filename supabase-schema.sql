@@ -25,9 +25,35 @@ create table if not exists public.workspace_catalog (
 
 create table if not exists public.workspace_user_roles (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  role text not null check (role in ('owner', 'admin', 'staff')) default 'staff',
+  role text not null check (role in ('owner', 'admin', 'staff', 'driver')) default 'staff',
+  driver_key text,
   updated_at timestamptz not null default now()
 );
+
+alter table public.workspace_user_roles
+  add column if not exists driver_key text;
+
+alter table public.workspace_user_roles
+  drop constraint if exists workspace_user_roles_role_check;
+
+alter table public.workspace_user_roles
+  add constraint workspace_user_roles_role_check
+  check (role in ('owner', 'admin', 'staff', 'driver'));
+
+update public.workspace_user_roles
+set driver_key = null
+where role <> 'driver'
+  and driver_key is not null;
+
+alter table public.workspace_user_roles
+  drop constraint if exists workspace_user_roles_driver_link_check;
+
+alter table public.workspace_user_roles
+  add constraint workspace_user_roles_driver_link_check
+  check (
+    (role = 'driver' and driver_key is not null and btrim(driver_key) <> '')
+    or (role <> 'driver' and driver_key is null)
+  );
 
 create unique index if not exists workspace_user_roles_single_owner
   on public.workspace_user_roles (role)
@@ -39,37 +65,111 @@ alter table public.returned_tile_records enable row level security;
 alter table public.workspace_catalog enable row level security;
 alter table public.workspace_user_roles enable row level security;
 
+create or replace function public.current_workspace_role()
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select role
+  from public.workspace_user_roles
+  where user_id = auth.uid()
+$$;
+
+create or replace function public.current_workspace_driver_key()
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select driver_key
+  from public.workspace_user_roles
+  where user_id = auth.uid()
+    and role = 'driver'
+$$;
+
+revoke all on function public.current_workspace_role() from public, anon, authenticated;
+revoke all on function public.current_workspace_driver_key() from public, anon, authenticated;
+grant execute on function public.current_workspace_role() to authenticated;
+grant execute on function public.current_workspace_driver_key() to authenticated;
+
 drop policy if exists "Authenticated workspace access" on public.orders;
-create policy "Authenticated workspace access"
+drop policy if exists "Workspace staff can manage orders" on public.orders;
+drop policy if exists "Drivers can read assigned orders" on public.orders;
+create policy "Workspace staff can manage orders"
   on public.orders
   for all
   to authenticated
-  using (true)
-  with check (true);
+  using (public.current_workspace_role() in ('owner', 'admin', 'staff'))
+  with check (public.current_workspace_role() in ('owner', 'admin', 'staff'));
+
+create policy "Drivers can read assigned orders"
+  on public.orders
+  for select
+  to authenticated
+  using (
+    public.current_workspace_role() = 'driver'
+    and public.current_workspace_driver_key() is not null
+    and exists (
+      select 1
+      from public.drivers linked_driver
+      where regexp_replace(coalesce(linked_driver.phone, ''), '[^0-9]', '', 'g')
+        = regexp_replace(public.current_workspace_driver_key(), '[^0-9]', '', 'g')
+        and (
+          (
+            regexp_replace(coalesce(data->>'driverPhone', ''), '[^0-9]', '', 'g') <> ''
+            and regexp_replace(coalesce(data->>'driverPhone', ''), '[^0-9]', '', 'g')
+              = regexp_replace(linked_driver.phone, '[^0-9]', '', 'g')
+          )
+          or (
+            btrim(coalesce(data->>'driver', '')) <> ''
+            and lower(btrim(data->>'driver')) = lower(btrim(linked_driver.name))
+          )
+        )
+    )
+  );
 
 drop policy if exists "Authenticated workspace access" on public.drivers;
-create policy "Authenticated workspace access"
+drop policy if exists "Workspace staff can manage drivers" on public.drivers;
+drop policy if exists "Drivers can read their linked driver record" on public.drivers;
+create policy "Workspace staff can manage drivers"
   on public.drivers
   for all
   to authenticated
-  using (true)
-  with check (true);
+  using (public.current_workspace_role() in ('owner', 'admin', 'staff'))
+  with check (public.current_workspace_role() in ('owner', 'admin', 'staff'));
+
+create policy "Drivers can read their linked driver record"
+  on public.drivers
+  for select
+  to authenticated
+  using (
+    public.current_workspace_role() = 'driver'
+    and public.current_workspace_driver_key() is not null
+    and regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') <> ''
+    and regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g')
+      = regexp_replace(public.current_workspace_driver_key(), '[^0-9]', '', 'g')
+  );
 
 drop policy if exists "Authenticated workspace access" on public.returned_tile_records;
-create policy "Authenticated workspace access"
+drop policy if exists "Workspace staff can manage returned tiles" on public.returned_tile_records;
+create policy "Workspace staff can manage returned tiles"
   on public.returned_tile_records
   for all
   to authenticated
-  using (true)
-  with check (true);
+  using (public.current_workspace_role() in ('owner', 'admin', 'staff'))
+  with check (public.current_workspace_role() in ('owner', 'admin', 'staff'));
 
 drop policy if exists "Authenticated workspace access" on public.workspace_catalog;
-create policy "Authenticated workspace access"
+drop policy if exists "Workspace staff can manage the catalog" on public.workspace_catalog;
+create policy "Workspace staff can manage the catalog"
   on public.workspace_catalog
   for all
   to authenticated
-  using (true)
-  with check (true);
+  using (public.current_workspace_role() in ('owner', 'admin', 'staff'))
+  with check (public.current_workspace_role() in ('owner', 'admin', 'staff'));
 
 grant select, insert, update, delete on public.orders to authenticated;
 grant select, insert, update, delete on public.drivers to authenticated;
@@ -227,6 +327,7 @@ create policy "Users can upload their own profile photo"
   to authenticated
   with check (
     bucket_id = 'profile-photos'
+    and public.current_workspace_role() in ('owner', 'admin', 'staff')
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
@@ -237,6 +338,7 @@ create policy "Users can read their own profile photo"
   to authenticated
   using (
     bucket_id = 'profile-photos'
+    and public.current_workspace_role() in ('owner', 'admin', 'staff')
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
@@ -247,10 +349,12 @@ create policy "Users can update their own profile photo"
   to authenticated
   using (
     bucket_id = 'profile-photos'
+    and public.current_workspace_role() in ('owner', 'admin', 'staff')
     and (storage.foldername(name))[1] = auth.uid()::text
   )
   with check (
     bucket_id = 'profile-photos'
+    and public.current_workspace_role() in ('owner', 'admin', 'staff')
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
@@ -260,6 +364,7 @@ from auth.users
 where lower(email) = 'engahmedgurey@gmail.com'
 on conflict (user_id) do update
 set role = 'owner',
+    driver_key = null,
     updated_at = now();
 
 do $$

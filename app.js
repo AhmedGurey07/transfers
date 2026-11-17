@@ -126,6 +126,7 @@
   let supabaseClient = null;
   let cloudUser = null;
   let cloudRole = "staff";
+  let cloudDriverKey = "";
   let currentPreparedBy = "Eng Ahmed Gurey";
   let workspaceUsers = [];
   let cloudChannel = null;
@@ -2115,6 +2116,29 @@
     setSyncStatus("Online · orders and drivers sync across signed-in devices.");
   }
 
+  async function loadDriverCloudData() {
+    if (!cloudDriverKey) throw new Error("This driver account has no linked saved driver.");
+    const [orderResult, driverResult] = await Promise.all([
+      supabaseClient.from("orders").select("id,data").order("id"),
+      supabaseClient.from("drivers").select("name,phone").eq("phone", cloudDriverKey).maybeSingle()
+    ]);
+    if (orderResult.error) throw orderResult.error;
+    if (driverResult.error) throw driverResult.error;
+    if (!driverResult.data) throw new Error("The driver linked to this account is no longer saved in the workspace.");
+
+    orders = loadOrders(orderResult.data.map((row) => row.data));
+    drivers = loadDrivers([{ name: driverResult.data.name, phone: driverResult.data.phone }]);
+    if (!drivers.length) throw new Error("The linked driver record is invalid.");
+    returnedTiles = [];
+    returnedTilesSetupError = "";
+    catalogApprovals = [];
+    selectedShaaficiDriverPhone = drivers[0].phone;
+    selectedShaaficiOrderIndex = 0;
+    renderSavedDrivers();
+    renderAllOrders();
+    setSyncStatus("Online · showing orders assigned to your linked driver.");
+  }
+
   function setUsersStatus(message, isError = false) {
     const status = $("#users-status");
     status.textContent = message;
@@ -2123,6 +2147,9 @@
 
   async function invokeUserManagement(body) {
     const { data, error } = await supabaseClient.functions.invoke("manage-users", { body });
+    const explainError = (message) => body.role === "driver" && message === "Choose a valid workspace role."
+      ? "Driver accounts aren't enabled on Supabase yet. Run the updated supabase-schema.sql and deploy the updated manage-users function."
+      : message;
     if (error) {
       let message = error.message || "Could not complete user management request.";
       if (error.context instanceof Response) {
@@ -2133,9 +2160,9 @@
           console.error("Could not read the user-management error response.", parseError);
         }
       }
-      throw new Error(message);
+      throw new Error(explainError(message));
     }
-    if (data?.error) throw new Error(data.error);
+    if (data?.error) throw new Error(explainError(data.error));
     return data;
   }
 
@@ -2165,6 +2192,22 @@
       : new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(date);
   }
 
+  function renderManagedUserDriverOptions(selectedPhone = "") {
+    const select = $("#managed-user-driver");
+    select.replaceChildren();
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = drivers.length ? "Choose a saved driver" : "No saved drivers available";
+    select.append(placeholder);
+    drivers.forEach((driver) => {
+      const option = document.createElement("option");
+      option.value = driver.phone;
+      option.textContent = `${driver.name} — ${driver.phone}`;
+      select.append(option);
+    });
+    select.value = selectedPhone;
+  }
+
   function resetManagedUserForm() {
     $("#user-form").reset();
     $("#managed-user-id").value = "";
@@ -2180,6 +2223,10 @@
     $("#managed-user-role-field").hidden = cloudRole !== "owner";
     $("#managed-user-role").querySelector('option[value="owner"]').hidden = true;
     $("#managed-user-role").disabled = false;
+    renderManagedUserDriverOptions();
+    $("#managed-user-driver-field").hidden = true;
+    $("#managed-user-driver").required = false;
+    $("#user-role-help").textContent = "Admins can create and manage staff. Only the owner can assign driver access; drivers can view only their linked driver's orders.";
     setUsersStatus("");
   }
 
@@ -2193,6 +2240,7 @@
         user.name || "—",
         user.email || "—",
         user.role.charAt(0).toUpperCase() + user.role.slice(1),
+        user.driverName || user.driverKey || "—",
         user.active ? "Active" : "Inactive",
         formatUserDate(user.lastSignInAt)
       ];
@@ -2259,6 +2307,12 @@
     $("#managed-user-role-field").hidden = cloudRole !== "owner";
     $("#managed-user-role").querySelector('option[value="owner"]').hidden = user.role !== "owner";
     $("#managed-user-role").disabled = user.role === "owner";
+    renderManagedUserDriverOptions(user.driverKey || "");
+    $("#managed-user-driver-field").hidden = user.role !== "driver";
+    $("#managed-user-driver").required = user.role === "driver";
+    $("#user-role-help").textContent = user.role === "driver"
+      ? "This account can view only the selected driver's orders in SHAAFICI Drivers."
+      : "Admins can create and manage staff. Only the owner can assign driver access; drivers can view only their linked driver's orders.";
     $("#managed-user-password-fields").hidden = true;
     $("#managed-user-password").required = false;
     $("#managed-user-password-confirm").required = false;
@@ -2294,11 +2348,18 @@
     const userId = $("#managed-user-id").value;
     const password = $("#managed-user-password").value;
     const passwordConfirmation = $("#managed-user-password-confirm").value;
+    const role = cloudRole === "owner" ? $("#managed-user-role").value : "staff";
+    const driverKey = role === "driver" ? $("#managed-user-driver").value : "";
     const payload = {
       name: $("#managed-user-name").value.trim(),
       email: $("#managed-user-email").value.trim(),
-      role: cloudRole === "owner" ? $("#managed-user-role").value : "staff"
+      role,
+      driverKey
     };
+    if (role === "driver" && !driverKey) {
+      setUsersStatus("Choose a saved driver for this account.", true);
+      return;
+    }
     if (!userId && password.length < 8) {
       setUsersStatus("Use an initial password with at least 8 characters.", true);
       return;
@@ -2430,9 +2491,17 @@
     cloudRefreshTimer = window.setTimeout(async () => {
       if (!cloudUser) return;
       try {
-        await loadCloudData(false);
+        if (cloudRole === "driver") await loadDriverCloudData();
+        else await loadCloudData(false);
       } catch (error) {
         console.error("Could not refresh shared online data.", error);
+        if (cloudRole === "driver") {
+          orders = [];
+          drivers = [];
+          selectedShaaficiDriverPhone = "";
+          selectedShaaficiOrderIndex = 0;
+          renderSavedDrivers();
+        }
         setSyncStatus(`Online refresh failed — ${error.message}`, true);
       }
     }, 250);
@@ -2465,22 +2534,54 @@
       setAuthStatus("Loading your online orders…");
       try {
         const roleResult = await supabaseClient.from("workspace_user_roles")
-          .select("role").eq("user_id", user.id).maybeSingle();
+          .select("role,driver_key").eq("user_id", user.id).maybeSingle();
+        let driverRoleSchemaMissing = false;
         if (roleResult.error) {
-          console.error("Could not load the workspace user role.", roleResult.error);
-          cloudRole = "staff";
+          const missingDriverKey = ["42703", "PGRST204"].includes(roleResult.error.code)
+            && roleResult.error.message.toLocaleLowerCase().includes("driver_key");
+          if (!missingDriverKey) {
+            throw new Error(`Could not load your workspace role: ${roleResult.error.message}`);
+          }
+          const legacyRoleResult = await supabaseClient.from("workspace_user_roles")
+            .select("role").eq("user_id", user.id).maybeSingle();
+          if (legacyRoleResult.error) {
+            throw new Error(`Could not load your workspace role: ${legacyRoleResult.error.message}`);
+          }
+          cloudRole = legacyRoleResult.data?.role || "staff";
+          cloudDriverKey = "";
+          driverRoleSchemaMissing = true;
         } else {
           cloudRole = roleResult.data?.role || "staff";
+          cloudDriverKey = cloudRole === "driver" ? roleResult.data?.driver_key || "" : "";
         }
-        await loadCloudData(true);
-        await applyYesterdayOrderTransfers();
+        if (driverRoleSchemaMissing && cloudRole === "driver") {
+          throw new Error("Driver accounts require the updated Supabase schema. Ask the workspace owner to run supabase-schema.sql.");
+        }
+        if (cloudRole === "driver" && !cloudDriverKey) {
+          throw new Error("This driver account is not linked to a saved driver. Ask the workspace owner to link it.");
+        }
+        if (cloudRole === "driver") await loadDriverCloudData();
+        else {
+          await loadCloudData(true);
+          await applyYesterdayOrderTransfers();
+        }
         $("#auth-gate").hidden = true;
         $("#app-shell").hidden = false;
         $("#storage-description").textContent = `Signed in as ${user.email || "workspace member"}.`;
         renderLoadedApp();
         subscribeToCloudChanges();
+        if (driverRoleSchemaMissing && ["owner", "admin"].includes(cloudRole)) {
+          setSyncStatus("Driver accounts are unavailable until the updated Supabase schema is applied.", true);
+        }
       } catch (error) {
         cloudUser = null;
+        cloudRole = "staff";
+        cloudDriverKey = "";
+        orders = [];
+        drivers = [];
+        returnedTiles = [];
+        catalogApprovals = [];
+        $("#app-shell").hidden = true;
         console.error("Could not load the online workspace.", error);
         showAuthGate(`Could not load online data: ${error.message}`, true);
       }
@@ -2498,11 +2599,14 @@
     cloudChannel = null;
     clearTimeout(cloudRefreshTimer);
     resetForm();
-    setView("overview");
     cloudUser = null;
     cloudRole = "staff";
+    cloudDriverKey = "";
+    setView("overview");
     orders = [];
     drivers = [];
+    selectedShaaficiDriverPhone = "";
+    selectedShaaficiOrderIndex = 0;
     catalogApprovals = [];
     scheduledReportFrequency = "off";
     showAuthGate("Sign in to load your shared online workspace.");
@@ -2788,7 +2892,7 @@
       : "No drivers saved yet";
     $("#drivers-directory-empty span").textContent = drivers.length
       ? "Try a different name or phone number."
-      : "Add a driver to make them available in order forms.";
+      : "Save a driver from an order form to make them available here.";
     $("#toggle-driver-directory").textContent = driversDirectoryVisible ? "Hide drivers" : "View drivers";
     $("#toggle-driver-directory").setAttribute("aria-expanded", String(driversDirectoryVisible));
   }
@@ -2840,11 +2944,12 @@
 
   function getOrdersForDriver(driver, dateRange = null) {
     const driverName = driver.name.trim().toLocaleLowerCase();
-    const driverPhone = driver.phone.trim();
+    const driverPhone = driver.phone.replace(/\D/g, "");
     return orders.filter((order) => {
       if (order.deletedAt) return false;
+      const orderPhone = order.driverPhone.replace(/\D/g, "");
       const assignedToDriver = order.driver.trim().toLocaleLowerCase() === driverName
-        || Boolean(driverPhone && order.driverPhone.trim() === driverPhone);
+        || Boolean(driverPhone && orderPhone === driverPhone);
       if (!assignedToDriver || !dateRange) return assignedToDriver;
       const orderDate = getOrderDateForDriverFilter(order);
       return orderDate >= dateRange.startDate && orderDate <= dateRange.endDate;
@@ -2879,7 +2984,7 @@
       : "No saved drivers";
     $("#shaafici-driver-options-empty span").textContent = drivers.length
       ? "Try a different name or phone number."
-      : "Add a driver above to get started.";
+      : "No drivers are available yet.";
 
     if (!orderedDrivers.some((driver) => driver.phone === selectedShaaficiDriverPhone)) {
       selectedShaaficiDriverPhone = orderedDrivers[0]?.phone || "";
@@ -2920,7 +3025,7 @@
       orderEmpty.hidden = false;
       orderEmpty.textContent = drivers.length
         ? query ? "No drivers match your search." : "Choose a driver to see their orders."
-        : "Add a driver above to get started.";
+        : "No drivers are available yet.";
       return;
     }
 
@@ -3532,6 +3637,11 @@
   }
 
   function setView(name, { recordHistory = true, confirmUnsaved = true } = {}) {
+    if (cloudDeployment && cloudRole === "driver" && name !== "drivers") {
+      name = "drivers";
+      recordHistory = false;
+      confirmUnsaved = false;
+    }
     if (name !== "new-order" && $("#new-order-view").classList.contains("active")
       && confirmUnsaved && !confirmDiscardUnsavedOrder()) return false;
     closeMobileNavigation();
@@ -4721,7 +4831,6 @@
 
   function getReceiptScreenshotBlob() {
     if (!printPreviewOrder) throw new Error("There is no order to capture.");
-    if (typeof html2canvas !== "function") throw new Error("Could not load receipt screenshot support. Refresh the page and try again.");
     const sheet = $(".print-sheet");
     if (!sheet) throw new Error("The Epson receipt preview is unavailable.");
     const bounds = sheet.getBoundingClientRect();
@@ -4729,34 +4838,44 @@
     if (receiptScreenshotPromise && receiptScreenshotCacheKey === cacheKey) return receiptScreenshotPromise;
 
     receiptScreenshotCacheKey = cacheKey;
-    const screenshotPromise = html2canvas(sheet, {
-      backgroundColor: "#fff",
-      scale: 2,
-      logging: false,
-      onclone: (captureDocument) => {
-        captureDocument.querySelector("#take-receipt-screenshot")?.remove();
-        captureDocument.querySelector(".print-sheet-header")?.remove();
-        captureDocument.querySelector(".print-sheet-rule")?.remove();
-        captureDocument.querySelectorAll(".print-item-product").forEach((product) => {
-          if (!/[\u0590-\u08ff]/.test(product.textContent || "")) {
-            product.style.direction = "ltr";
-            product.style.unicodeBidi = "normal";
-          }
-        });
-        captureDocument.querySelectorAll(".print-item-ordered").forEach((ordered) => {
-          ordered.style.direction = "ltr";
-          ordered.style.unicodeBidi = "normal";
-        });
+    const screenshotPromise = Promise.resolve().then(async () => {
+      if (typeof window.html2canvas !== "function") {
+        await loadExternalScript(new URL("vendor/html2canvas/html2canvas.min.js", location.href).href);
       }
-    }).then((canvas) => new Promise((resolve, reject) => {
-      if (canvas.width > 32767 || canvas.height > 32767) {
-        reject(new Error("This receipt is too large to capture as one image."));
-        return;
+      const screenshotter = window.html2canvas;
+      if (typeof screenshotter !== "function") {
+        throw new Error("The receipt screenshot library did not initialize. Check that the site includes vendor/html2canvas/html2canvas.min.js.");
       }
-      canvas.toBlob((blob) => blob
-        ? resolve(blob)
-        : reject(new Error("Could not encode the screenshot image.")), "image/png");
-    })).catch((error) => {
+      const canvas = await screenshotter(sheet, {
+        backgroundColor: "#fff",
+        scale: 2,
+        logging: false,
+        onclone: (captureDocument) => {
+          captureDocument.querySelector("#take-receipt-screenshot")?.remove();
+          captureDocument.querySelector(".print-sheet-header")?.remove();
+          captureDocument.querySelector(".print-sheet-rule")?.remove();
+          captureDocument.querySelectorAll(".print-item-product").forEach((product) => {
+            if (!/[\u0590-\u08ff]/.test(product.textContent || "")) {
+              product.style.direction = "ltr";
+              product.style.unicodeBidi = "normal";
+            }
+          });
+          captureDocument.querySelectorAll(".print-item-ordered").forEach((ordered) => {
+            ordered.style.direction = "ltr";
+            ordered.style.unicodeBidi = "normal";
+          });
+        }
+      });
+      return new Promise((resolve, reject) => {
+        if (canvas.width > 32767 || canvas.height > 32767) {
+          reject(new Error("This receipt is too large to capture as one image."));
+          return;
+        }
+        canvas.toBlob((blob) => blob
+          ? resolve(blob)
+          : reject(new Error("Could not encode the screenshot image.")), "image/png");
+      });
+    }).catch((error) => {
       if (receiptScreenshotPromise === screenshotPromise) {
         receiptScreenshotPromise = null;
         receiptScreenshotCacheKey = "";
@@ -6168,6 +6287,12 @@
   $("#user-form").addEventListener("submit", saveWorkspaceUser);
   $("#users-refresh").addEventListener("click", loadWorkspaceUsers);
   $("#cancel-user-edit").addEventListener("click", resetManagedUserForm);
+  $("#managed-user-role").addEventListener("change", () => {
+    const isDriver = cloudRole === "owner" && $("#managed-user-role").value === "driver";
+    $("#managed-user-driver-field").hidden = !isDriver;
+    $("#managed-user-driver").required = isDriver;
+    if (!isDriver) $("#managed-user-driver").value = "";
+  });
   $$("[data-category]").forEach((button) => button.addEventListener("click", () => {
     if (button.dataset.category === "Converter" && $("#new-order-view").classList.contains("active")) {
       converterPinnedOpen = true;
@@ -6188,10 +6313,6 @@
   });
   $("#save-driver").addEventListener("click", () => {
     saveDriver($("#saved-driver-name"), $("#saved-driver-phone"), true);
-  });
-  $("#drivers-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    saveDriver($("#drivers-page-name"), $("#drivers-page-phone"));
   });
   $("#toggle-driver-directory").addEventListener("click", () => {
     driversDirectoryVisible = !driversDirectoryVisible;
@@ -6486,19 +6607,33 @@
   });
 
   function renderLoadedApp() {
+    const isDriver = cloudDeployment && cloudRole === "driver";
     $("#app-shell").hidden = false;
     $("#auth-gate").hidden = true;
     $("#sign-out").hidden = !cloudDeployment;
-    $("#users-nav-link").hidden = !cloudDeployment || !["owner", "admin"].includes(cloudRole);
-    $("#add-catalog-product").hidden = cloudDeployment && cloudRole === "staff";
-    $("#upload-workbook").hidden = cloudDeployment && cloudRole === "staff";
-    $("#approvals-panel").hidden = !cloudDeployment;
-    $("#account-avatar").hidden = !cloudDeployment;
+    $$("[data-view]").forEach((link) => {
+      link.hidden = isDriver
+        ? link.dataset.view !== "drivers"
+        : link.dataset.view === "users" && (!cloudDeployment || !["owner", "admin"].includes(cloudRole));
+    });
+    $("#add-catalog-product").hidden = cloudDeployment && !["owner", "admin"].includes(cloudRole);
+    $("#upload-workbook").hidden = cloudDeployment && !["owner", "admin"].includes(cloudRole);
+    $("#approvals-panel").hidden = !cloudDeployment || isDriver;
+    $("#account-avatar").hidden = !cloudDeployment || isDriver;
+    $("#sidebar-account-profile").hidden = isDriver;
+    $(".drivers-layout").hidden = isDriver;
+    $("#show-shaafici-drivers").hidden = isDriver;
+    $("#shaafici-driver-panel").hidden = !isDriver;
+    $("#show-shaafici-drivers").setAttribute("aria-expanded", String(isDriver));
+    $("#drivers-title").textContent = isDriver ? "My driver orders" : "Drivers";
+    $("#drivers-view .page-heading .welcome-copy").textContent = isDriver
+      ? "View the orders assigned to your linked driver."
+      : "Browse saved drivers and review their orders.";
     renderAccountAvatar(cloudUser);
     $("#welcome-greeting").textContent = greetingForTime();
     $("#welcome-user").textContent = usernameForUser(cloudUser);
-    $("#export-data").hidden = cloudDeployment && !["owner", "admin"].includes(cloudRole);
-    $("#import-data").hidden = !cloudDeployment || !["owner", "admin"].includes(cloudRole);
+    $("#export-data").hidden = cloudDeployment && (isDriver || !["owner", "admin"].includes(cloudRole));
+    $("#import-data").hidden = !cloudDeployment || isDriver || !["owner", "admin"].includes(cloudRole);
     $("#storage-description").textContent = cloudDeployment
       ? `Signed in as ${cloudUser?.email || "workspace member"}.`
       : "Your orders are saved on this device.";
@@ -6530,13 +6665,14 @@
     updateConverter();
     if (needsMoneyDataCleanup && !cloudDeployment) persistOrders();
     renderOverview();
-    runScheduledReports();
+    if (!isDriver) runScheduledReports();
     refreshPreview();
     if (!cloudDeployment && (location.protocol === "file:"
       || location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname))) {
       syncSourceData();
       window.setInterval(() => syncSourceData(), 3000);
     }
+    if (isDriver) setView("drivers", { recordHistory: false, confirmUnsaved: false });
   }
 
   if ("serviceWorker" in navigator && location.protocol !== "file:") {

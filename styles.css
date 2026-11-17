@@ -619,6 +619,7 @@ form button { font-size: 12px; }
 @media (max-width: 620px) { .drivers-manager-fields { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .main-footer { flex-wrap: wrap; gap: 7px; } .sync-status { flex-basis: 100%; text-align: left; } }
 .users-layout, .drivers-layout { grid-template-columns: minmax(260px,.75fr) minmax(0,1.8fr); }
+.drivers-directory-panel { grid-column: 1 / -1; }
 .users-list-panel { min-width: 0; overflow: hidden; }
 .users-list-panel .table-scroll { overflow-x: auto; }
 .users-list-panel table { min-width: 620px; }

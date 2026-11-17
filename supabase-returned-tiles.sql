@@ -7,12 +7,27 @@ create table if not exists public.returned_tile_records (
 alter table public.returned_tile_records enable row level security;
 
 drop policy if exists "Authenticated workspace access" on public.returned_tile_records;
-create policy "Authenticated workspace access"
+drop policy if exists "Workspace staff can manage returned tiles" on public.returned_tile_records;
+create policy "Workspace staff can manage returned tiles"
   on public.returned_tile_records
   for all
   to authenticated
-  using (true)
-  with check (true);
+  using (
+    exists (
+      select 1
+      from public.workspace_user_roles
+      where user_id = auth.uid()
+        and role in ('owner', 'admin', 'staff')
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from public.workspace_user_roles
+      where user_id = auth.uid()
+        and role in ('owner', 'admin', 'staff')
+    )
+  );
 
 grant select, insert, update, delete on public.returned_tile_records to authenticated;
 

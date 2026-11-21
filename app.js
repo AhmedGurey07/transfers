@@ -119,6 +119,14 @@
   const productsByPdfName = new Map();
   const productsByCode = new Map();
   const productsByCodeFamily = new Map();
+  const catalogSearchText = new WeakMap();
+  const catalogRemainingStock = new WeakMap();
+  const catalogMinimumRemainingStock = new WeakMap();
+  const catalogProductIndexes = new WeakMap();
+  let catalogReservationIndexOrders = null;
+  let catalogReservationIndex = null;
+  const TABLE_PAGE_SIZE = 20;
+  const tablePaginationStates = new WeakMap();
   let lastSyncedVersion = "";
   let syncInProgress = false;
   let lastSyncError = "";
@@ -146,12 +154,35 @@
   let editingReturnedTileId = "";
   let viewHistory = [];
   let orderFormSnapshot = "";
+  function indexCatalogProduct(item, index = catalogProductIndexes.get(item) ?? -1) {
+    const values = [
+      item.product,
+      ...(item.quantities || []),
+      ...(item.qtyItems || []),
+      ...(item.taken || []),
+      ...(item.rQuantities || []),
+      ...(item.uomNs || []),
+      ...(item.statuses || []),
+      item.unit
+    ];
+    catalogSearchText.set(item, values.join(" ").toLocaleLowerCase());
+    const remaining = (Array.isArray(item.rQuantities) ? item.rQuantities : [item.rQuantities])
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean)
+      .map(Number)
+      .filter(Number.isFinite);
+    catalogRemainingStock.set(item, remaining);
+    catalogMinimumRemainingStock.set(item, remaining.length ? Math.min(...remaining) : null);
+    catalogProductIndexes.set(item, index);
+  }
+
   function indexProductCatalog() {
     productsByName.clear();
     productsByPdfName.clear();
     productsByCode.clear();
     productsByCodeFamily.clear();
-    productCatalog.forEach((item) => {
+    productCatalog.forEach((item, index) => {
+      indexCatalogProduct(item, index);
       const nameKey = item.product.toLocaleLowerCase();
       const pdfNameKey = cleanPdfText(item.product).toLocaleLowerCase();
       const namedMatches = productsByName.get(nameKey) || [];
@@ -233,19 +264,22 @@
     renderProductCatalogTable();
   }
 
+  const CATALOG_PAGE_SIZE = TABLE_PAGE_SIZE;
+  const catalogFilterFields = [
+    ["product", "PRODUCT"], ["quantities", "QUANTITY"], ["qtyItems", "Q/ITEM"],
+    ["taken", "TAKEN"], ["rQuantities", "R/QUANTITY"], ["uomNs", "UOM/N"],
+    ["unit", "UOM"], ["statuses", "STS"]
+  ];
+  let catalogPage = 1;
+  let catalogSearchFrame = 0;
+
   function getFilteredCatalogRows() {
     const query = $("#catalog-search").value.trim().toLocaleLowerCase();
-    const filterFields = [
-      ["product", "PRODUCT"], ["quantities", "QUANTITY"], ["qtyItems", "Q/ITEM"],
-      ["taken", "TAKEN"], ["rQuantities", "R/QUANTITY"], ["uomNs", "UOM/N"],
-      ["unit", "UOM"], ["statuses", "STS"]
-    ];
-    return productCatalog.filter((item) => {
-      const matchesSearch = `${item.product} ${(item.quantities || []).join(" ")} ${(item.qtyItems || []).join(" ")} ${(item.taken || []).join(" ")} ${(item.rQuantities || []).join(" ")} ${(item.uomNs || []).join(" ")} ${(item.statuses || []).join(" ")} ${item.unit}`
-        .toLocaleLowerCase().includes(query);
-      if (!matchesSearch) return false;
-      if (catalogLowStockOnly && !isCatalogLowStock(item)) return false;
-      return filterFields.every(([field]) => {
+    const filtered = [];
+    for (const item of productCatalog) {
+      if (query && !catalogSearchText.get(item).includes(query)) continue;
+      if (catalogLowStockOnly && !isCatalogLowStock(item)) continue;
+      const matchesFilters = catalogFilterFields.every(([field]) => {
         const selected = catalogValueFilters[field];
         if (catalogNumericFields.has(field)) {
           if (!selected) return true;
@@ -275,37 +309,50 @@
         const values = Array.isArray(item[field]) ? item[field] : [item[field]];
         return values.some((value) => selected.has(String(value || "—")));
       });
-    });
+      if (matchesFilters) filtered.push(item);
+    }
+    return filtered;
   }
 
   function remainingStockValues(item) {
+    const cached = catalogRemainingStock.get(item);
+    if (cached) return cached;
     const values = Array.isArray(item.rQuantities) ? item.rQuantities : [item.rQuantities];
-    return values.map((value) => String(value ?? "").trim())
+    const remaining = values.map((value) => String(value ?? "").trim())
       .filter(Boolean)
       .map(Number)
       .filter(Number.isFinite);
+    catalogRemainingStock.set(item, remaining);
+    catalogMinimumRemainingStock.set(item, remaining.length ? Math.min(...remaining) : null);
+    return remaining;
   }
 
   function isCatalogLowStock(item) {
-    const stock = remainingStockValues(item);
-    return stock.length > 0 && Math.min(...stock) <= lowStockThreshold;
+    if (!catalogMinimumRemainingStock.has(item)) remainingStockValues(item);
+    const minimum = catalogMinimumRemainingStock.get(item);
+    return minimum !== null && minimum !== undefined && minimum <= lowStockThreshold;
   }
 
-  function renderProductCatalogTable() {
-    const filterFields = [
-      ["product", "PRODUCT"], ["quantities", "QUANTITY"], ["qtyItems", "Q/ITEM"],
-      ["taken", "TAKEN"], ["rQuantities", "R/QUANTITY"], ["uomNs", "UOM/N"],
-      ["unit", "UOM"], ["statuses", "STS"]
-    ];
-    $("#catalog-headings").replaceChildren(
-      ...filterFields.map(([, label]) => Object.assign(document.createElement("th"), { textContent: label })),
-      ...["RESERVED", "AVAILABLE"].map((label) =>
-        Object.assign(document.createElement("th"), { textContent: label })),
-      Object.assign(document.createElement("th"), { innerHTML: '<span class="sr-only">Actions</span>' })
-    );
+  function renderProductCatalogTable({ preservePage = false } = {}) {
+    if (!preservePage) catalogPage = 1;
+    const headings = $("#catalog-headings");
+    if (!headings.childElementCount) {
+      headings.replaceChildren(
+        ...catalogFilterFields.map(([, label]) => Object.assign(document.createElement("th"), { textContent: label })),
+        ...["RESERVED", "AVAILABLE"].map((label) =>
+          Object.assign(document.createElement("th"), { textContent: label })),
+        Object.assign(document.createElement("th"), { innerHTML: '<span class="sr-only">Actions</span>' })
+      );
+    }
     const filtered = getFilteredCatalogRows();
+    const pageCount = Math.max(1, Math.ceil(filtered.length / CATALOG_PAGE_SIZE));
+    catalogPage = Math.min(Math.max(1, catalogPage), pageCount);
+    const firstItem = (catalogPage - 1) * CATALOG_PAGE_SIZE;
+    const visible = filtered.slice(firstItem, firstItem + CATALOG_PAGE_SIZE);
+    const reservationIndex = visible.length ? getCatalogReservationIndex() : null;
     const target = $("#catalog-products");
-    target.replaceChildren(...filtered.map((item, index) => {
+    target.replaceChildren(...visible.map((item, index) => {
+      const productIndex = catalogProductIndexes.get(item) ?? -1;
       const row = document.createElement("tr");
       const stock = remainingStockValues(item);
       if (stock.length && Math.min(...stock) <= lowStockThreshold) {
@@ -335,9 +382,9 @@
       const rQuantity = document.createElement("td");
       rQuantity.textContent = formatCatalogValues(item.rQuantities);
       const reserved = document.createElement("td");
-      reserved.textContent = formatCatalogNumber(String(reservedQuantityFor(item)));
+      reserved.textContent = formatCatalogNumber(String(reservedQuantityFor(item, true, reservationIndex)));
       const available = document.createElement("td");
-      available.textContent = formatCatalogNumber(String(availableStockAfterReservations(item)));
+      available.textContent = formatCatalogNumber(String(availableStockAfterReservations(item, reservationIndex)));
       const uomN = document.createElement("td");
       uomN.textContent = formatCatalogValues(item.uomNs);
       const unit = document.createElement("td");
@@ -353,7 +400,7 @@
       edit.textContent = "Edit";
       edit.addEventListener("click", (event) => {
         event.stopPropagation();
-        beginCatalogEdit(productCatalog.indexOf(item));
+        beginCatalogEdit(productIndex);
       });
       const add = document.createElement("button");
       add.type = "button";
@@ -363,7 +410,7 @@
       add.textContent = "Add";
       add.addEventListener("click", (event) => {
         event.stopPropagation();
-        beginCatalogAdjustment(productCatalog.indexOf(item), 1);
+        beginCatalogAdjustment(productIndex, 1);
       });
       const history = document.createElement("button");
       history.type = "button";
@@ -385,7 +432,7 @@
       deleteProduct.textContent = "Delete";
       deleteProduct.addEventListener("click", (event) => {
         event.stopPropagation();
-        deleteCatalogProduct(productCatalog.indexOf(item));
+        deleteCatalogProduct(productIndex);
       });
       const detailsRow = document.createElement("tr");
       detailsRow.className = "catalog-row-details";
@@ -445,8 +492,27 @@
     }));
     labelTableRows(target);
     $("#catalog-view-count").textContent = filtered.length.toLocaleString("en");
+    const showing = visible.length;
+    const firstShown = filtered.length ? firstItem + 1 : 0;
+    const lastShown = firstItem + showing;
+    $("#catalog-results-status").textContent = filtered.length
+      ? `Showing ${firstShown.toLocaleString("en")}–${lastShown.toLocaleString("en")} of ${filtered.length.toLocaleString("en")} products`
+      : "";
+    $("#catalog-page-status").textContent = `Page ${catalogPage.toLocaleString("en")} of ${pageCount.toLocaleString("en")}`;
+    $("#catalog-page-previous").disabled = catalogPage <= 1;
+    $("#catalog-page-next").disabled = catalogPage >= pageCount;
+    $("#catalog-page-controls").hidden = filtered.length === 0;
     $("#catalog-overview-filter").hidden = !catalogLowStockOnly;
     $("#catalog-empty").hidden = filtered.length > 0;
+  }
+
+  function scheduleCatalogSearchRender() {
+    catalogPage = 1;
+    if (catalogSearchFrame) window.cancelAnimationFrame(catalogSearchFrame);
+    catalogSearchFrame = window.requestAnimationFrame(() => {
+      catalogSearchFrame = 0;
+      renderProductCatalogTable({ preservePage: true });
+    });
   }
 
   async function deleteCatalogProduct(index) {
@@ -513,17 +579,143 @@
         cell.dataset.label = headers[index] || "";
       });
     });
+    const container = tbody.closest(".table-view-container");
+    const pagination = container && tablePaginationStates.get(container);
+    if (pagination) pagination.page = 1;
+    refreshTablePagination(tbody);
+  }
+
+  function refreshTablePagination(tbody) {
+    const container = tbody.closest(".table-view-container");
+    const state = container && tablePaginationStates.get(container);
+    if (!state) return;
+    const rows = [...tbody.rows].filter((row) => !row.classList.contains("catalog-row-details"));
+    const pageCount = Math.max(1, Math.ceil(rows.length / TABLE_PAGE_SIZE));
+    state.page = Math.min(Math.max(1, state.page), pageCount);
+    container.dataset.tablePage = String(state.page);
+    const firstRow = (state.page - 1) * TABLE_PAGE_SIZE;
+    rows.forEach((row, index) => {
+      const pageHidden = index < firstRow || index >= firstRow + TABLE_PAGE_SIZE;
+      if (pageHidden) row.dataset.pageHidden = "true";
+      else delete row.dataset.pageHidden;
+      const detailsRow = row.nextElementSibling;
+      if (detailsRow?.classList.contains("catalog-row-details")) {
+        if (pageHidden) detailsRow.dataset.pageHidden = "true";
+        else delete detailsRow.dataset.pageHidden;
+      }
+    });
+    state.status.textContent = rows.length
+      ? `Page ${state.page} of ${pageCount} · ${rows.length.toLocaleString("en")} rows`
+      : "No rows";
+    state.previous.disabled = state.page <= 1;
+    state.next.disabled = state.page >= pageCount;
+    state.controls.hidden = rows.length === 0;
+  }
+
+  function addTablePagination(container, tableScroll, tbody) {
+    if (!tbody || tbody.id === "catalog-products") return;
+    const controls = document.createElement("nav");
+    controls.className = "table-pagination";
+    controls.setAttribute("aria-label", "Table pages");
+    const previous = document.createElement("button");
+    previous.type = "button";
+    previous.className = "table-pagination-arrow";
+    previous.setAttribute("aria-label", "Previous page");
+    previous.textContent = "‹";
+    const status = document.createElement("span");
+    status.className = "table-pagination-status";
+    const next = document.createElement("button");
+    next.type = "button";
+    next.className = "table-pagination-arrow";
+    next.setAttribute("aria-label", "Next page");
+    next.textContent = "›";
+    const state = { page: 1, controls, previous, next, status };
+    tablePaginationStates.set(container, state);
+    new MutationObserver(() => {
+      state.page = 1;
+      refreshTablePagination(tbody);
+    }).observe(tbody, { childList: true });
+    previous.addEventListener("click", () => {
+      state.page -= 1;
+      refreshTablePagination(tbody);
+    });
+    next.addEventListener("click", () => {
+      state.page += 1;
+      refreshTablePagination(tbody);
+    });
+    controls.append(previous, status, next);
+    container.insertBefore(controls, tableScroll.nextSibling);
+    refreshTablePagination(tbody);
+  }
+
+  function createTableViewIcon(view) {
+    const namespace = "http://www.w3.org/2000/svg";
+    const icon = document.createElementNS(namespace, "svg");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    if (view === "table") {
+      icon.innerHTML = '<rect x="4" y="5" width="16" height="14" rx="1"></rect><path d="M4 10h16M10 10v9"></path>';
+    } else {
+      icon.innerHTML = '<path d="M5 6h14M5 12h14M5 18h14"></path>';
+    }
+    return icon;
+  }
+
+  function setupTableViewControls() {
+    $$(".table-scroll").forEach((tableScroll, index) => {
+      const table = $("table", tableScroll);
+      if (!table) return;
+      const container = tableScroll.parentElement;
+      if (!container || $(".table-view-controls", container)) return;
+      const tableBody = $("tbody", table);
+      const tableKey = tableBody?.id || table.id || `table-${index + 1}`;
+      const storageKey = `shaafici-order-desk-table-view-${encodeURIComponent(tableKey)}`;
+      const savedView = localStorage.getItem(storageKey);
+      let currentView = savedView === "cards" ? "cards" : "table";
+
+      container.classList.add("table-view-container");
+      container.dataset.tableView = currentView;
+
+      const controls = document.createElement("div");
+      controls.className = "table-view-controls";
+      controls.setAttribute("role", "group");
+      controls.setAttribute("aria-label", "Choose table display");
+
+      [["table", "Show the full table"], ["cards", "Show stacked cards"]].forEach(([view, label]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "table-view-button";
+        button.dataset.tableView = view;
+        button.setAttribute("aria-label", label);
+        button.title = label;
+        button.setAttribute("aria-pressed", String(currentView === view));
+        button.append(createTableViewIcon(view));
+        button.addEventListener("click", () => {
+          currentView = view;
+          localStorage.setItem(storageKey, view);
+          container.dataset.tableView = view;
+          $$("button[data-table-view]", controls).forEach((viewButton) => {
+            viewButton.setAttribute("aria-pressed", String(viewButton.dataset.tableView === currentView));
+          });
+        });
+        controls.append(button);
+      });
+
+      container.insertBefore(controls, tableScroll);
+      addTablePagination(container, tableScroll, tableBody);
+    });
   }
 
   function openCatalogPreview(item) {
+    const reservationIndex = getCatalogReservationIndex();
     const details = [
       ["Product", item.product],
       ["Quantity", formatCatalogValues(item.quantities)],
       ["Q/ITEM", formatCatalogValues(item.qtyItems)],
       ["Taken", formatCatalogValues(item.taken)],
       ["R/QUANTITY", formatCatalogValues(item.rQuantities)],
-      ["Reserved", formatCatalogNumber(String(reservedQuantityFor(item)))],
-      ["Available after reservations", formatCatalogNumber(String(availableStockAfterReservations(item)))],
+      ["Reserved", formatCatalogNumber(String(reservedQuantityFor(item, true, reservationIndex)))],
+      ["Available after reservations", formatCatalogNumber(String(availableStockAfterReservations(item, reservationIndex)))],
       ["UOM/N", formatCatalogValues(item.uomNs)],
       ["UOM", item.unit || "—"],
       ["STS", formatCatalogValues(item.statuses)]
@@ -1686,6 +1878,7 @@
   function exportCatalogToExcel() {
     const headers = ["PRODUCT / DESCRIPTION", "QUANTITY", "Q/ITEM", "TAKEN", "R/QUANTITY", "UOM/N", "UOM", "STS", "RESERVED", "AVAILABLE"];
     const valueForExcel = (value) => escapeAttribute(Array.isArray(value) ? value.join(", ") : value ?? "");
+    const reservationIndex = getCatalogReservationIndex();
     const rows = getFilteredCatalogRows().map((item) => [
       item.product,
       item.quantities,
@@ -1695,8 +1888,8 @@
       item.uomNs,
       item.unit,
       item.statuses,
-      reservedQuantityFor(item),
-      availableStockAfterReservations(item)
+      reservedQuantityFor(item, true, reservationIndex),
+      availableStockAfterReservations(item, reservationIndex)
     ]);
     const table = `<table><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${
       rows.map((row) => `<tr>${row.map((value) => `<td>${valueForExcel(value)}</td>`).join("")}</tr>`).join("")
@@ -2271,6 +2464,7 @@
       row.append(actions);
       body.append(row);
     });
+    labelTableRows(body);
   }
 
   async function loadWorkspaceUsers() {
@@ -2879,6 +3073,7 @@
       row.append(nameCell, phoneCell);
       list.append(row);
     });
+    labelTableRows(list);
     $("#drivers-directory-count").textContent = query
       ? `${matchingDrivers.length} of ${drivers.length} ${drivers.length === 1 ? "driver" : "drivers"} found`
       : drivers.length
@@ -3189,24 +3384,60 @@
     return Number.isFinite(start) && Math.floor((today - start) / 86400000) >= allowedDays;
   }
 
-  function reservedQuantityFor(item, includeApplied = true) {
-    const productCode = item.product.match(/^\s*\[([^\]]+)\]/)?.[1]?.toLocaleLowerCase();
-    return orders.filter((order) => !order.deletedAt
-      && (includeApplied || !order.catalogTakenApplied)
-      && ["Pending", "In progress"].includes(normalizeOrderStatus(order.status)))
-      .reduce((total, order) => total + (order.items || []).reduce((subtotal, orderItem) => {
-        const orderCode = String(orderItem.product || "").match(/^\s*\[([^\]]+)\]/)?.[1]?.toLocaleLowerCase();
-        const sameProduct = productCode && orderCode
-          ? productCode === orderCode
-          : String(orderItem.product || "").toLocaleLowerCase() === item.product.toLocaleLowerCase();
-        return subtotal + (sameProduct ? Math.max(0, Number(orderItem.ordered) || 0) : 0);
-      }, 0), 0);
+  function buildCatalogReservationIndex() {
+    const byCode = new Map();
+    const byUncodedName = new Map();
+    const byName = new Map();
+    const unappliedByCode = new Map();
+    const unappliedByUncodedName = new Map();
+    const unappliedByName = new Map();
+    const addQuantity = (map, key, quantity) => map.set(key, (map.get(key) || 0) + quantity);
+
+    orders.forEach((order) => {
+      if (order.deletedAt || !["Pending", "In progress"].includes(normalizeOrderStatus(order.status))) return;
+      const unapplied = !order.catalogTakenApplied;
+      (order.items || []).forEach((orderItem) => {
+        const name = String(orderItem.product || "").toLocaleLowerCase();
+        const code = String(orderItem.product || "").match(/^\s*\[([^\]]+)\]/)?.[1]?.toLocaleLowerCase();
+        const quantity = Math.max(0, Number(orderItem.ordered) || 0);
+        addQuantity(byName, name, quantity);
+        if (unapplied) addQuantity(unappliedByName, name, quantity);
+        if (code) {
+          addQuantity(byCode, code, quantity);
+          if (unapplied) addQuantity(unappliedByCode, code, quantity);
+        } else {
+          addQuantity(byUncodedName, name, quantity);
+          if (unapplied) addQuantity(unappliedByUncodedName, name, quantity);
+        }
+      });
+    });
+
+    return { byCode, byUncodedName, byName, unappliedByCode, unappliedByUncodedName, unappliedByName };
   }
 
-  function availableStockAfterReservations(item) {
+  function getCatalogReservationIndex() {
+    if (catalogReservationIndex && catalogReservationIndexOrders === orders) return catalogReservationIndex;
+    catalogReservationIndex = buildCatalogReservationIndex();
+    catalogReservationIndexOrders = orders;
+    return catalogReservationIndex;
+  }
+
+  function reservedQuantityFor(item, includeApplied = true, reservationIndex = getCatalogReservationIndex()) {
+    const productCode = item.product.match(/^\s*\[([^\]]+)\]/)?.[1]?.toLocaleLowerCase();
+    const productName = item.product.toLocaleLowerCase();
+    if (productCode) {
+      const codeTotals = includeApplied ? reservationIndex.byCode : reservationIndex.unappliedByCode;
+      const nameTotals = includeApplied ? reservationIndex.byUncodedName : reservationIndex.unappliedByUncodedName;
+      return (codeTotals.get(productCode) || 0) + (nameTotals.get(productName) || 0);
+    }
+    const nameTotals = includeApplied ? reservationIndex.byName : reservationIndex.unappliedByName;
+    return nameTotals.get(productName) || 0;
+  }
+
+  function availableStockAfterReservations(item, reservationIndex = getCatalogReservationIndex()) {
     const remaining = remainingStockValues(item);
     const currentRemaining = remaining.length ? Math.min(...remaining) : 0;
-    return Math.max(0, currentRemaining - reservedQuantityFor(item, false));
+    return Math.max(0, currentRemaining - reservedQuantityFor(item, false, reservationIndex));
   }
 
   function formatDate(value) {
@@ -3932,6 +4163,7 @@
         : "";
     });
     item.statuses = item.rQuantities.map((value) => Number(value) === 0 ? "END" : "DONE");
+    indexCatalogProduct(item);
   }
 
   function isWarehouseTransfer(order) {
@@ -6228,6 +6460,7 @@
     });
   });
   updateOrderSortHeaders();
+  setupTableViewControls();
   $$("[data-view]").forEach((link) => link.addEventListener("click", (event) => {
     event.preventDefault();
     setView(link.dataset.view);
@@ -6581,7 +6814,15 @@
     .forEach((id) => $(`#${id}`).addEventListener("input", renderAllOrders));
   ["status-filter", "order-date-from-filter", "order-date-to-filter"]
     .forEach((id) => $(`#${id}`).addEventListener("change", renderAllOrders));
-  $("#catalog-search").addEventListener("input", renderProductCatalogTable);
+  $("#catalog-search").addEventListener("input", scheduleCatalogSearchRender);
+  $("#catalog-page-previous").addEventListener("click", () => {
+    catalogPage -= 1;
+    renderProductCatalogTable({ preservePage: true });
+  });
+  $("#catalog-page-next").addEventListener("click", () => {
+    catalogPage += 1;
+    renderProductCatalogTable({ preservePage: true });
+  });
   $("#low-stock-form").addEventListener("submit", saveLowStockThreshold);
   $("#scheduled-report-form").addEventListener("submit", saveScheduledReport);
   $("#catalog-filter-apply").addEventListener("click", applyCatalogFilterPanel);

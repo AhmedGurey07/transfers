@@ -7,17 +7,17 @@
   <link rel="manifest" href="manifest.webmanifest?v=20261109">
   <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=202611210013">
+  <link rel="stylesheet" href="styles.css?v=202611220001">
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="vendor/html2canvas/html2canvas.min.js" defer></script>
-  <script src="app.js?v=202611210005" defer></script>
+  <script src="app.js?v=202611220003" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
     <form class="auth-card" id="auth-form">
-      <img src="shaafici-warehouse-200-logo.png" alt="SHAAFICI Warehouse 200">
+      <img class="theme-aware-logo" src="shaafici-warehouse-200-logo.png" data-light-src="shaafici-warehouse-200-logo.png" data-dark-src="shaafici-warehouse-200-logo-dark.png" alt="SHAAFICI Warehouse 200">
       <p class="eyebrow">SHAAFICI · ORDER DESK</p>
       <h1 id="auth-title">Sign in to your workspace</h1>
       <p class="auth-copy">Your orders and saved drivers are stored securely online.</p>
@@ -32,7 +32,7 @@
       <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
     </form>
     <form class="auth-card" id="invite-signup-form" hidden>
-      <img src="shaafici-warehouse-200-logo.png" alt="SHAAFICI Warehouse 200">
+      <img class="theme-aware-logo" src="shaafici-warehouse-200-logo.png" data-light-src="shaafici-warehouse-200-logo.png" data-dark-src="shaafici-warehouse-200-logo-dark.png" alt="SHAAFICI Warehouse 200">
       <p class="eyebrow">INVITED WORKSPACE MEMBER</p>
       <h1 id="invite-signup-title">Complete your signup</h1>
       <p class="auth-copy">Set your username and password. You can also add a profile photo.</p>
@@ -59,7 +59,7 @@
     <button class="mobile-nav-backdrop" id="mobile-nav-backdrop" type="button" aria-label="Close navigation" hidden></button>
     <aside class="sidebar" id="app-sidebar">
       <a class="brand" href="#" aria-label="SHAAFICI Order Desk home">
-        <img class="brand-logo" src="shaafici-warehouse-200-logo.png" alt="SHAAFICI Warehouse 200">
+        <img class="brand-logo theme-aware-logo" src="shaafici-warehouse-200-logo.png" data-light-src="shaafici-warehouse-200-logo.png" data-dark-src="shaafici-warehouse-200-logo-dark.png" alt="SHAAFICI Warehouse 200">
       </a>
 
       <div class="nav-label">WORKSPACE</div>
@@ -99,7 +99,7 @@
           <span aria-hidden="true">←</span><span>Back</span>
         </button>
         <div class="breadcrumb"><span>Workspace</span><span class="crumb-slash">/</span><strong id="breadcrumb-current">Overview</strong></div>
-        <div class="topbar-actions"><span class="today-label" id="today-label"></span><button class="avatar" id="account-avatar" type="button" aria-label="Open your profile"><span id="account-avatar-initials">AG</span><img id="account-avatar-image" alt="" hidden></button></div>
+        <div class="topbar-actions"><span class="today-label" id="today-label"></span><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false" title="Switch to dark mode"><span id="theme-toggle-icon" aria-hidden="true">☾</span></button><button class="avatar" id="account-avatar" type="button" aria-label="Open your profile"><span id="account-avatar-initials">AG</span><img id="account-avatar-image" alt="" hidden></button></div>
       </header>
 
       <section class="view active" id="overview-view" aria-labelledby="welcome-title">

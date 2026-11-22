@@ -1,6 +1,9 @@
 (() => {
   const STORAGE_KEY = "ahmed-gurey-orders-v1";
   const DRIVERS_STORAGE_KEY = "ahmed-gurey-drivers-v1";
+  const THEME_STORAGE_KEY = "shaafici-order-desk-theme";
+  let currentTheme = localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = currentTheme;
   const cloudDeployment = location.protocol !== "file:"
     || Boolean(window.ORDER_DESK_SUPABASE?.url && window.ORDER_DESK_SUPABASE?.anonKey);
   const categories = [
@@ -659,6 +662,24 @@
       icon.innerHTML = '<path d="M5 6h14M5 12h14M5 18h14"></path>';
     }
     return icon;
+  }
+
+  function setColorTheme(theme, persist = false) {
+    currentTheme = theme === "dark" ? "dark" : "light";
+    document.documentElement.dataset.theme = currentTheme;
+    const isDark = currentTheme === "dark";
+    const themeToggle = $("#theme-toggle");
+    const label = `Switch to ${isDark ? "light" : "dark"} mode`;
+    themeToggle.setAttribute("aria-label", label);
+    themeToggle.setAttribute("aria-pressed", String(isDark));
+    themeToggle.title = label;
+    $("#theme-toggle-icon").textContent = isDark ? "☀" : "☾";
+    $$(".theme-aware-logo").forEach((logo) => {
+      logo.src = isDark ? logo.dataset.darkSrc : logo.dataset.lightSrc;
+    });
+    const themeColor = $('meta[name="theme-color"]');
+    themeColor.content = isDark ? "#111a14" : "#f5f6f2";
+    if (persist) localStorage.setItem(THEME_STORAGE_KEY, currentTheme);
   }
 
   function setupTableViewControls() {
@@ -6461,6 +6482,10 @@
   });
   updateOrderSortHeaders();
   setupTableViewControls();
+  setColorTheme(currentTheme);
+  $("#theme-toggle").addEventListener("click", () => {
+    setColorTheme(currentTheme === "dark" ? "light" : "dark", true);
+  });
   $$("[data-view]").forEach((link) => link.addEventListener("click", (event) => {
     event.preventDefault();
     setView(link.dataset.view);

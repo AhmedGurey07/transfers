@@ -60,9 +60,9 @@ Returned tiles are saved in the separate `returned_tile_records` Supabase table 
 
 The Overview and All orders pages use **Pending**, **In progress**, **Delivered**, and **Cancelled** statuses. Existing **Open** orders are shown as Pending and existing **Completed** orders as Delivered. Click a status pill in either order table to cycle through the four statuses.
 
-Overview count cards are clickable: order cards open the matching order list (including overdue orders), while **Total items** and **Low stock** open the matching catalog products.
+Overview count cards are clickable: order cards open the matching order list (including overdue orders), while **Total items**, **Low stock**, **Ended products**, and **Critical condition** open the matching catalog products.
 
-Product Catalog highlights products whose numeric **R/QUANTITY** is at or below the shared low-stock threshold. The default is 10; enter another non-negative value and select **Save threshold** to store it with the shared catalog.
+Product Catalog separates stock conditions. **Low stock** includes non-ended products with a numeric **UOM/N** value from 1 through 20, inclusive. **Ended products** have an **R/QUANTITY** value of 0 or an **STS** value of **END**; they are excluded from Low stock. **Critical condition** includes products with a negative **R/QUANTITY** value. The low-stock range is fixed at 1–20; it is not user-configurable.
 
 Workspace owners and admins can delete a product from the catalog. The confirmation explains that existing orders and item history are kept.
 

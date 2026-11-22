@@ -2371,4 +2371,103 @@ form .auth-field input::placeholder {
   html[data-theme="dark"] .pdf-import-status.error,
   html[data-theme="dark"] .sync-status.error { color: #ffaaa1; }
   html[data-theme="dark"] .pdf-import-status.duplicate-warning { color: #f1c87d; }
+  html[data-theme="dark"] .table-card thead th {
+    border-color: var(--line);
+    color: #c1cdc4;
+    background: var(--surface-raised);
+  }
+  html[data-theme="dark"] .table-card tbody tr { background: var(--surface); }
+  html[data-theme="dark"] .table-card tbody td {
+    border-color: #2a3a2f;
+    color: var(--ink-soft);
+    background-color: transparent;
+  }
+  html[data-theme="dark"] .table-card tbody tr:hover { background: #24352a; }
+  html[data-theme="dark"] .table-card tbody tr.order-overdue-row { background: #382624; }
+  html[data-theme="dark"] .table-card tbody tr.notification-unread { background: #21382a; }
+  html[data-theme="dark"] .table-card tbody tr.low-stock-row { background: #392c1f !important; }
+  html[data-theme="dark"] .table-card tbody tr.warehouse-transfer-row td {
+    color: #f0c183 !important;
+    background: #392e20;
+  }
+  html[data-theme="dark"] .table-card .item-history-quantity { color: #d3ddd6 !important; }
+  html[data-theme="dark"] .table-card .manual-adjustment-added .item-history-quantity { color: #8ee5a8 !important; }
+  html[data-theme="dark"] .table-card .manual-adjustment-subtracted .item-history-quantity { color: #ffaaa1 !important; }
+  html[data-theme="dark"] .table-card .overdue-label,
+  html[data-theme="dark"] .table-card .approval-state { color: #ffaaa1; }
+  html[data-theme="dark"] #returned-tiles-view .returned-tiles-column-filters th {
+    background: var(--surface-raised);
+  }
+  html[data-theme="dark"] #returned-tiles-view .returned-tiles-column-filters input {
+    border-color: var(--line);
+    color: var(--ink);
+    background: var(--surface-inset);
+  }
+  html[data-theme="dark"] .items-table th {
+    border-color: var(--line);
+    color: var(--muted);
+  }
+  html[data-theme="dark"] .items-table td {
+    border-color: var(--line);
+    color: var(--ink-soft);
+  }
+  html[data-theme="dark"] #catalog-view .catalog-filter-panel {
+    border-color: var(--line);
+    background: var(--surface-raised);
+  }
+  html[data-theme="dark"] #catalog-view .catalog-filter-fields input,
+  html[data-theme="dark"] #catalog-view .catalog-filter-fields select {
+    border-color: var(--line);
+    color: var(--ink);
+    background: var(--surface-inset);
+  }
+  html[data-theme="dark"] #catalog-view .catalog-filter-actions {
+    border-color: var(--line);
+  }
+  html[data-theme="dark"] #catalog-view #catalog-products tr {
+    border-color: var(--line);
+    background: var(--surface);
+  }
+  html[data-theme="dark"] #catalog-view #catalog-products tr:nth-child(even) {
+    background: #1d2a21;
+  }
+  html[data-theme="dark"] #catalog-view #catalog-products tr:hover {
+    background: #263b2c;
+  }
+  html[data-theme="dark"] #catalog-view #catalog-products tr.low-stock-row {
+    background: #392c1f !important;
+  }
+  html[data-theme="dark"] #catalog-view #catalog-products td {
+    border-color: var(--line);
+    background-color: transparent;
+  }
+  html[data-theme="dark"] #catalog-view #catalog-products td:nth-child(1) { color: #8ed8ac !important; }
+  html[data-theme="dark"] #catalog-view #catalog-products td:nth-child(2) { color: #a6caff !important; }
+  html[data-theme="dark"] #catalog-view #catalog-products td:nth-child(3) { color: #d3a9ff !important; }
+  html[data-theme="dark"] #catalog-view #catalog-products td:nth-child(4) { color: #ffb389 !important; }
+  html[data-theme="dark"] #catalog-view #catalog-products td:nth-child(5) { color: #e4ece6 !important; }
+  html[data-theme="dark"] #catalog-view #catalog-products td:nth-child(6) { color: #80d8d1 !important; }
+  html[data-theme="dark"] #catalog-view #catalog-products td:nth-child(7) { color: #e6ce83 !important; }
+  html[data-theme="dark"] #catalog-view #catalog-products td:nth-child(8) { color: #b5c5ff !important; }
+  html[data-theme="dark"] #catalog-view #catalog-products td:nth-child(9) { color: #c1cdc4 !important; }
+  html[data-theme="dark"] #catalog-view #catalog-products td:first-child .catalog-product-history-link {
+    color: #8ed8ac !important;
+  }
+  html[data-theme="dark"] #catalog-view #catalog-products tr:nth-child(even) td:first-child,
+  html[data-theme="dark"] #catalog-view #catalog-products tr:hover td:first-child,
+  html[data-theme="dark"] #catalog-view #catalog-products td:last-child,
+  html[data-theme="dark"] #catalog-view #catalog-products tr:nth-child(even) td:last-child,
+  html[data-theme="dark"] #catalog-view #catalog-products tr:hover td:last-child {
+    background-color: transparent;
+  }
+  html[data-theme="dark"] #catalog-view .catalog-row-details > td {
+    background: #1b2a20;
+  }
+  html[data-theme="dark"] #catalog-view .catalog-row-detail {
+    border-color: var(--line);
+    color: var(--ink);
+    background: var(--surface);
+  }
+  html[data-theme="dark"] #catalog-view .catalog-row-detail span { color: var(--muted); }
+  html[data-theme="dark"] #catalog-view .catalog-row-detail strong { color: var(--ink); }
 }

@@ -92,8 +92,7 @@
     }
   };
   let productCatalog = window.AHMED_GUREY_PRODUCTS;
-  let catalogLowStockOnly = false;
-  let lowStockThreshold = 10;
+  let catalogStockFilter = "all";
   let scheduledReportFrequency = "off";
   if (!Array.isArray(productCatalog)) throw new Error("The warehouse product catalog did not load.");
   function cleanPdfText(value) {
@@ -124,11 +123,13 @@
   const productsByCodeFamily = new Map();
   const catalogSearchText = new WeakMap();
   const catalogRemainingStock = new WeakMap();
-  const catalogMinimumRemainingStock = new WeakMap();
+  const catalogUomNValues = new WeakMap();
   const catalogProductIndexes = new WeakMap();
   let catalogReservationIndexOrders = null;
   let catalogReservationIndex = null;
   const TABLE_PAGE_SIZE = 20;
+  const LOW_STOCK_MIN_UOM_N = 1;
+  const LOW_STOCK_MAX_UOM_N = 20;
   const tablePaginationStates = new WeakMap();
   let lastSyncedVersion = "";
   let syncInProgress = false;
@@ -157,6 +158,14 @@
   let editingReturnedTileId = "";
   let viewHistory = [];
   let orderFormSnapshot = "";
+  function catalogNumericValues(values) {
+    return (Array.isArray(values) ? values : [values])
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean)
+      .map(Number)
+      .filter(Number.isFinite);
+  }
+
   function indexCatalogProduct(item, index = catalogProductIndexes.get(item) ?? -1) {
     const values = [
       item.product,
@@ -169,13 +178,9 @@
       item.unit
     ];
     catalogSearchText.set(item, values.join(" ").toLocaleLowerCase());
-    const remaining = (Array.isArray(item.rQuantities) ? item.rQuantities : [item.rQuantities])
-      .map((value) => String(value ?? "").trim())
-      .filter(Boolean)
-      .map(Number)
-      .filter(Number.isFinite);
+    const remaining = catalogNumericValues(item.rQuantities);
     catalogRemainingStock.set(item, remaining);
-    catalogMinimumRemainingStock.set(item, remaining.length ? Math.min(...remaining) : null);
+    catalogUomNValues.set(item, catalogNumericValues(item.uomNs));
     catalogProductIndexes.set(item, index);
   }
 
@@ -281,7 +286,7 @@
     const filtered = [];
     for (const item of productCatalog) {
       if (query && !catalogSearchText.get(item).includes(query)) continue;
-      if (catalogLowStockOnly && !isCatalogLowStock(item)) continue;
+      if (!matchesCatalogStockFilter(item)) continue;
       const matchesFilters = catalogFilterFields.every(([field]) => {
         const selected = catalogValueFilters[field];
         if (catalogNumericFields.has(field)) {
@@ -320,20 +325,42 @@
   function remainingStockValues(item) {
     const cached = catalogRemainingStock.get(item);
     if (cached) return cached;
-    const values = Array.isArray(item.rQuantities) ? item.rQuantities : [item.rQuantities];
-    const remaining = values.map((value) => String(value ?? "").trim())
-      .filter(Boolean)
-      .map(Number)
-      .filter(Number.isFinite);
+    const remaining = catalogNumericValues(item.rQuantities);
     catalogRemainingStock.set(item, remaining);
-    catalogMinimumRemainingStock.set(item, remaining.length ? Math.min(...remaining) : null);
     return remaining;
   }
 
   function isCatalogLowStock(item) {
-    if (!catalogMinimumRemainingStock.has(item)) remainingStockValues(item);
-    const minimum = catalogMinimumRemainingStock.get(item);
-    return minimum !== null && minimum !== undefined && minimum <= lowStockThreshold;
+    return !isCatalogEnded(item) && catalogUomNValuesFor(item).some((value) =>
+      value >= LOW_STOCK_MIN_UOM_N && value <= LOW_STOCK_MAX_UOM_N
+    );
+  }
+
+  function isCatalogEnded(item) {
+    const hasZeroRemaining = remainingStockValues(item).some((value) => value === 0);
+    const statuses = Array.isArray(item.statuses) ? item.statuses : [item.statuses];
+    return hasZeroRemaining || statuses.some((status) =>
+      String(status ?? "").trim().toLocaleUpperCase() === "END"
+    );
+  }
+
+  function isCatalogCritical(item) {
+    return remainingStockValues(item).some((value) => value < 0);
+  }
+
+  function catalogUomNValuesFor(item) {
+    const cached = catalogUomNValues.get(item);
+    if (cached) return cached;
+    const values = catalogNumericValues(item.uomNs);
+    catalogUomNValues.set(item, values);
+    return values;
+  }
+
+  function matchesCatalogStockFilter(item) {
+    if (catalogStockFilter === "low-stock") return isCatalogLowStock(item);
+    if (catalogStockFilter === "ended") return isCatalogEnded(item);
+    if (catalogStockFilter === "critical") return isCatalogCritical(item);
+    return true;
   }
 
   function renderProductCatalogTable({ preservePage = false } = {}) {
@@ -357,10 +384,7 @@
     target.replaceChildren(...visible.map((item, index) => {
       const productIndex = catalogProductIndexes.get(item) ?? -1;
       const row = document.createElement("tr");
-      const stock = remainingStockValues(item);
-      if (stock.length && Math.min(...stock) <= lowStockThreshold) {
-        row.classList.add("low-stock-row");
-      }
+      if (isCatalogLowStock(item)) row.classList.add("low-stock-row");
       row.title = "Click to preview this product";
       row.addEventListener("click", () => openCatalogPreview(item));
       const product = document.createElement("td");
@@ -505,7 +529,35 @@
     $("#catalog-page-previous").disabled = catalogPage <= 1;
     $("#catalog-page-next").disabled = catalogPage >= pageCount;
     $("#catalog-page-controls").hidden = filtered.length === 0;
-    $("#catalog-overview-filter").hidden = !catalogLowStockOnly;
+    const stockFilterDetails = {
+      all: {
+        title: "Product catalog",
+        description: "Products and quantities loaded from the warehouse Excel workbook."
+      },
+      "low-stock": {
+        title: "Low-stock products",
+        description: "Products with UOM/N from 1 through 20, excluding ended products.",
+        filterLabel: "Showing only non-ended products with UOM/N values from 1 through 20"
+      },
+      ended: {
+        title: "Ended products",
+        description: "Products with R/QUANTITY 0 or STS END.",
+        filterLabel: "Showing only products with R/QUANTITY 0 or STS END"
+      },
+      critical: {
+        title: "Critical condition products",
+        description: "Products with negative R/QUANTITY values.",
+        filterLabel: "Showing only products with negative R/QUANTITY values"
+      }
+    };
+    const stockFilter = stockFilterDetails[catalogStockFilter] || stockFilterDetails.all;
+    $("#catalog-title").textContent = stockFilter.title;
+    $("#catalog-view .page-heading .welcome-copy").textContent = stockFilter.description;
+    $("#breadcrumb-current").textContent = stockFilter.title;
+    $("#catalog-overview-filter").hidden = catalogStockFilter === "all";
+    if (catalogStockFilter !== "all") {
+      $("#catalog-overview-filter-label").textContent = stockFilter.filterLabel;
+    }
     $("#catalog-empty").hidden = filtered.length > 0;
   }
 
@@ -1752,11 +1804,6 @@
   function applySyncedSourceData(data) {
     validateSyncedSourceData(data);
     productCatalog = data.products;
-    if (data.lowStockThreshold != null
-      && Number.isFinite(Number(data.lowStockThreshold)) && Number(data.lowStockThreshold) >= 0) {
-      lowStockThreshold = Number(data.lowStockThreshold);
-      $("#low-stock-threshold").value = String(lowStockThreshold);
-    }
     if (["off", "daily", "weekly"].includes(data.scheduledReportFrequency)) {
       scheduledReportFrequency = data.scheduledReportFrequency;
     }
@@ -1803,7 +1850,7 @@
       adjustments: catalogAdjustments,
       catalogEditHistory,
       catalogApprovals,
-      lowStockThreshold,
+      lowStockThreshold: LOW_STOCK_MAX_UOM_N,
       scheduledReportFrequency
     };
   }
@@ -1862,38 +1909,6 @@
     if (error) throw error;
     if (data?.data && catalogHasWorkbookColumns(data.data)) applySyncedSourceData(data.data);
     return Boolean(data?.data);
-  }
-
-  async function saveLowStockThreshold(event) {
-    event.preventDefault();
-    const input = $("#low-stock-threshold");
-    const status = $("#low-stock-status");
-    const threshold = Number(input.value);
-    if (!Number.isFinite(threshold) || threshold < 0) {
-      status.textContent = "Enter a valid threshold of zero or more.";
-      status.classList.add("error");
-      return;
-    }
-    const previousThreshold = lowStockThreshold;
-    lowStockThreshold = threshold;
-    status.textContent = "Saving threshold…";
-    status.classList.remove("error");
-    try {
-      if (cloudDeployment) {
-        await saveCatalogToCloud(currentCatalogData(), false);
-      } else {
-        localStorage.setItem("shaafici-order-desk-low-stock-threshold", String(threshold));
-      }
-      renderProductCatalogTable();
-      renderOverview();
-      status.textContent = "Low-stock threshold saved.";
-    } catch (error) {
-      lowStockThreshold = previousThreshold;
-      input.value = String(previousThreshold);
-      console.error("Could not save the low-stock threshold.", error);
-      status.textContent = error.message || "Could not save the threshold.";
-      status.classList.add("error");
-    }
   }
 
   function exportCatalogToExcel() {
@@ -5323,6 +5338,8 @@
     $("#stat-cancelled").textContent = String(activeOrders.filter((order) => normalizeOrderStatus(order.status) === "Cancelled").length);
     $("#stat-overdue").textContent = String(activeOrders.filter(isOrderOverdue).length);
     $("#stat-low-stock").textContent = String(productCatalog.filter(isCatalogLowStock).length);
+    $("#stat-ended-products").textContent = String(productCatalog.filter(isCatalogEnded).length);
+    $("#stat-critical-stock").textContent = String(productCatalog.filter(isCatalogCritical).length);
     $("#nav-order-count").textContent = String(activeOrders.length);
     const target = $("#recent-orders");
     target.replaceChildren(...sorted.slice(0, 5).map(orderRow));
@@ -5716,10 +5733,7 @@
     const active = orders.filter((order) => !order.deletedAt);
     const pending = active.filter((order) => normalizeOrderStatus(order.status) === "Pending").length;
     const overdue = active.filter(isOrderOverdue).length;
-    const lowStock = productCatalog.filter((item) => {
-      const stock = remainingStockValues(item);
-      return stock.length > 0 && Math.min(...stock) <= lowStockThreshold;
-    }).length;
+    const lowStock = productCatalog.filter(isCatalogLowStock).length;
     const event = {
       timestamp: now,
       message: `${frequency === "daily" ? "Daily" : "Weekly"} report: ${active.length} orders, ${pending} pending, ${overdue} overdue, ${lowStock} low-stock products.`,
@@ -6492,9 +6506,15 @@
   }));
   $$("[data-overview-stat]").forEach((card) => card.addEventListener("click", () => {
     const target = card.dataset.overviewStat;
-    if (target === "total-items" || target === "low-stock") {
+    if (["total-items", "low-stock", "ended-products", "critical-stock"].includes(target)) {
       if (!setView("catalog")) return;
-      catalogLowStockOnly = target === "low-stock";
+      catalogStockFilter = target === "total-items"
+        ? "all"
+        : target === "ended-products"
+          ? "ended"
+          : target === "critical-stock"
+            ? "critical"
+            : "low-stock";
       $("#catalog-search").value = "";
       Object.keys(catalogValueFilters).forEach((key) => delete catalogValueFilters[key]);
       renderCatalogFilterPanel();
@@ -6518,7 +6538,7 @@
     renderAllOrders();
   }));
   $("#catalog-overview-filter-clear").addEventListener("click", () => {
-    catalogLowStockOnly = false;
+    catalogStockFilter = "all";
     renderProductCatalogTable();
   });
   $("#history-search").addEventListener("input", renderHistory);
@@ -6848,7 +6868,6 @@
     catalogPage += 1;
     renderProductCatalogTable({ preservePage: true });
   });
-  $("#low-stock-form").addEventListener("submit", saveLowStockThreshold);
   $("#scheduled-report-form").addEventListener("submit", saveScheduledReport);
   $("#catalog-filter-apply").addEventListener("click", applyCatalogFilterPanel);
   $("#catalog-filter-cancel").addEventListener("click", cancelCatalogFilterPanel);
@@ -6923,14 +6942,6 @@
     renderSavedDrivers();
     $("#order-date").value = dateValue();
     $("#return-date").value = dateValue();
-    if (!cloudDeployment) {
-      const savedThresholdValue = localStorage.getItem("shaafici-order-desk-low-stock-threshold");
-      const savedThreshold = Number(savedThresholdValue);
-      if (savedThresholdValue !== null && Number.isFinite(savedThreshold) && savedThreshold >= 0) {
-        lowStockThreshold = savedThreshold;
-      }
-    }
-    $("#low-stock-threshold").value = String(lowStockThreshold);
     renderReturnedTiles();
     if (!itemsBody.children.length) createItemRow();
     updateConverterVisibility();

@@ -110,8 +110,8 @@
   }
   function extractCatalogCode(value) {
     const text = String(value || "");
-    const match = text.match(/\[((?:[a-z]\s*)?\d+(?:\s*[/-]\s*\d+)*)\]/i)
-      || text.match(/^\s*((?:[a-z]\s*)?\d+(?:\s*[/-]\s*\d+)*)\b/i);
+    const match = text.match(/\[((?:[a-z]\s*)?\d+(?:\s*[/-]\s*[a-z0-9]+)*)\]/i)
+      || text.match(/^\s*((?:[a-z]\s*)?\d+(?:\s*[/-]\s*[a-z0-9]+)*)\b/i);
     return match?.[1].replace(/\s+/g, "").toLocaleLowerCase() || "";
   }
   function getCatalogCodeFamily(code) {
@@ -461,61 +461,61 @@
         event.stopPropagation();
         deleteCatalogProduct(productIndex);
       });
-      const detailsRow = document.createElement("tr");
-      detailsRow.className = "catalog-row-details";
-      detailsRow.hidden = true;
-      const detailsCell = document.createElement("td");
-      detailsCell.colSpan = 11;
-      const detailsGrid = document.createElement("div");
-      detailsGrid.className = "catalog-row-details-grid";
-      const detailValues = [
-        ["QUANTITY", formatCatalogValues(item.quantities)],
-        ["Q/ITEM", formatCatalogValues(item.qtyItems)],
-        ["TAKEN", formatCatalogValues(item.taken)],
-        ["R/QUANTITY", formatCatalogValues(item.rQuantities)],
-        ["RESERVED", reserved.textContent],
-        ["AVAILABLE", available.textContent],
-        ["UOM/N", uomN.textContent],
-        ["UOM", unit.textContent || "—"],
-        ["STS", status.textContent]
-      ];
-      detailValues.forEach(([label, value]) => {
-        const detail = document.createElement("div");
-        detail.className = "catalog-row-detail";
-        const detailLabel = document.createElement("span");
-        detailLabel.textContent = label;
-        const detailValue = document.createElement("strong");
-        detailValue.textContent = value;
-        detail.append(detailLabel, detailValue);
-        detailsGrid.append(detail);
-      });
-      detailsCell.append(detailsGrid);
-      detailsRow.append(detailsCell);
+      const actionButtons = document.createElement("div");
+      actionButtons.className = "catalog-row-action-buttons";
+      actionButtons.hidden = true;
       const expand = document.createElement("button");
       expand.type = "button";
       expand.className = "catalog-row-expand-button";
       expand.setAttribute("aria-expanded", "false");
-      expand.setAttribute("aria-controls", `catalog-row-details-${index}`);
-      expand.setAttribute("aria-label", `Show remaining columns for ${item.product}`);
-      expand.title = "Show remaining columns";
-      expand.textContent = "⌄";
-      detailsRow.id = `catalog-row-details-${index}`;
+      expand.setAttribute("aria-controls", `catalog-row-actions-${index}`);
+      expand.setAttribute("aria-label", `Show actions for ${item.product}`);
+      expand.title = "Show product actions";
+      const expandIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      expandIcon.setAttribute("class", "catalog-row-expand-icon");
+      expandIcon.setAttribute("viewBox", "0 0 30 22");
+      expandIcon.setAttribute("aria-hidden", "true");
+      expandIcon.setAttribute("focusable", "false");
+      [
+        ["catalog-row-arrow-chevron-1", "M 2 2 L 9 11 L 2 20"],
+        ["catalog-row-arrow-chevron-2", "M 11 2 L 18 11 L 11 20"],
+        ["catalog-row-arrow-chevron-3", "M 20 2 L 27 11 L 20 20"]
+      ].forEach(([className, pathData]) => {
+        const chevron = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        chevron.setAttribute("class", `catalog-row-arrow-chevron ${className}`);
+        chevron.setAttribute("d", pathData);
+        expandIcon.append(chevron);
+      });
+      expand.append(expandIcon);
+      actionButtons.id = `catalog-row-actions-${index}`;
       expand.addEventListener("click", (event) => {
         event.stopPropagation();
-        const expanded = !detailsRow.hidden;
-        detailsRow.hidden = expanded;
+        const expanded = !actionButtons.hidden;
+        actionButtons.hidden = expanded;
+        actions.classList.toggle("catalog-row-actions-open", !expanded);
+        if (expanded) {
+          actionButtons.classList.remove("catalog-row-action-buttons-above");
+        } else {
+          const scrollArea = actions.closest(".table-scroll");
+          const scrollBounds = scrollArea?.getBoundingClientRect();
+          const viewportBottom = Math.min(window.innerHeight, scrollBounds?.bottom ?? window.innerHeight);
+          const spaceBelow = viewportBottom - actions.getBoundingClientRect().bottom;
+          actionButtons.classList.toggle(
+            "catalog-row-action-buttons-above",
+            spaceBelow < actionButtons.getBoundingClientRect().height + 8
+          );
+        }
         expand.setAttribute("aria-expanded", String(!expanded));
-        expand.setAttribute("aria-label", `${expanded ? "Show" : "Hide"} remaining columns for ${item.product}`);
-        expand.title = expanded ? "Show remaining columns" : "Hide remaining columns";
+        expand.setAttribute("aria-label", `${expanded ? "Show" : "Hide"} actions for ${item.product}`);
+        expand.title = expanded ? "Show product actions" : "Hide product actions";
       });
-      if (!cloudDeployment || ["owner", "admin"].includes(cloudRole)) actions.append(edit);
-      actions.append(add, history);
-      if (!cloudDeployment || ["owner", "admin"].includes(cloudRole)) actions.append(deleteProduct);
+      if (!cloudDeployment || ["owner", "admin"].includes(cloudRole)) actionButtons.append(edit);
+      actionButtons.append(add, history);
+      if (!cloudDeployment || ["owner", "admin"].includes(cloudRole)) actionButtons.append(deleteProduct);
+      actions.append(actionButtons);
       actions.append(expand);
       row.append(product, quantity, qtyItem, taken, rQuantity, uomN, unit, status, reserved, available, actions);
-      const fragment = document.createDocumentFragment();
-      fragment.append(row, detailsRow);
-      return fragment;
+      return row;
     }));
     labelTableRows(target);
     $("#catalog-view-count").textContent = filtered.length.toLocaleString("en");
@@ -3692,15 +3692,17 @@
 
   function readDeliveryQuantity(items, minX, maxX, fallbackUnit) {
     const column = items.filter((item) => item.x >= minX && item.x < maxX);
-    const quantityText = column.find((item) => /^-?[\d,]+(?:\.\d+)?$/.test(item.text));
-    if (!quantityText) return { quantity: 0, unit: fallbackUnit };
-    const unitText = column.find((item) => /^[A-Za-z]+$/.test(item.text));
-    const normalizedUnit = unitText?.text.toUpperCase();
+    const columnText = column.map((item) => item.text).join(" ");
+    const quantityMatch = columnText.match(/-?[\d,]+(?:\.\d+)?/);
+    if (!quantityMatch) return { quantity: 0, unit: fallbackUnit };
+    const quantityText = quantityMatch[0];
+    const unitMatch = columnText.match(/\b(PCS|PC|MTR|M2|M3|M|SQM|SQFT|BOX|CTN|CARTON|ROLL|LTR|KG)\b/i);
+    const normalizedUnit = unitMatch?.[1].toUpperCase();
     const unit = normalizedUnit === "PC" || normalizedUnit === "PCS" ? "PCS" : normalizedUnit;
     if (!unit || !units.includes(unit)) {
       throw new Error(`The delivery slip contains an unsupported unit: ${unitText?.text || "missing unit"}.`);
     }
-    return { quantity: Number(quantityText.text.replaceAll(",", "")), unit };
+    return { quantity: Number(quantityText.replaceAll(",", "")), unit };
   }
 
   async function parseDeliverySlipPdf(buffer) {

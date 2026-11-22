@@ -5329,8 +5329,83 @@
     });
   }
 
+  function overviewDateRange(period) {
+    const now = new Date();
+    const today = dateValue(now);
+    let start = today;
+    if (period === "week") {
+      start = dateValue(new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7)));
+    } else if (period === "month") {
+      start = dateValue(new Date(now.getFullYear(), now.getMonth(), 1));
+    } else if (period === "year") {
+      start = dateValue(new Date(now.getFullYear(), 0, 1));
+    }
+    return { start, end: today };
+  }
+
+  function renderOverviewChart(target, empty, values, unit) {
+    const entries = [...values.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], undefined, { sensitivity: "base" }))
+      .slice(0, 5);
+    target.replaceChildren(...entries.map(([label, count]) => {
+      const row = document.createElement("li");
+      row.className = "analytics-row";
+      const heading = document.createElement("div");
+      heading.className = "analytics-row-heading";
+      const name = document.createElement("span");
+      name.className = "analytics-row-label";
+      name.textContent = label;
+      name.title = label;
+      const value = document.createElement("span");
+      value.className = "analytics-row-value";
+      value.textContent = `${count.toLocaleString("en")} ${unit}`;
+      heading.append(name, value);
+      const track = document.createElement("div");
+      track.className = "analytics-bar-track";
+      track.setAttribute("role", "meter");
+      track.setAttribute("aria-label", `${label}: ${count} ${unit}`);
+      track.setAttribute("aria-valuemin", "0");
+      track.setAttribute("aria-valuemax", String(entries[0][1]));
+      track.setAttribute("aria-valuenow", String(count));
+      const bar = document.createElement("span");
+      bar.className = "analytics-bar";
+      bar.style.width = `${Math.max(4, (count / entries[0][1]) * 100)}%`;
+      track.append(bar);
+      row.append(heading, track);
+      return row;
+    }));
+    empty.hidden = entries.length > 0;
+  }
+
+  function renderOverviewAnalytics(activeOrders) {
+    const period = $("#overview-period").value;
+    const range = overviewDateRange(period);
+    const matchingOrders = activeOrders.filter((order) =>
+      normalizeOrderStatus(order.status) !== "Cancelled"
+      && typeof order.date === "string"
+      && order.date >= range.start && order.date <= range.end
+    );
+    const productOrders = new Map();
+    const branchOrders = new Map();
+    matchingOrders.forEach((order) => {
+      const productsInOrder = new Set((order.items || [])
+        .map((item) => String(item.product || "").trim())
+        .filter(Boolean));
+      productsInOrder.forEach((product) => {
+        productOrders.set(product, (productOrders.get(product) || 0) + 1);
+      });
+      const branch = String(order.branch || "").trim() || "Unassigned";
+      branchOrders.set(branch, (branchOrders.get(branch) || 0) + 1);
+    });
+    const periodLabels = { day: "Today", week: "This week", month: "This month", year: "This year" };
+    $("#overview-analytics-period").textContent = `${periodLabels[period]} · ${formatDate(range.start)}–${formatDate(range.end)}`;
+    renderOverviewChart($("#overview-product-sales"), $("#overview-products-empty"), productOrders, "orders");
+    renderOverviewChart($("#overview-branch-activity"), $("#overview-branches-empty"), branchOrders, "orders");
+  }
+
   function renderOverview() {
     const activeOrders = orders.filter((order) => !order.deletedAt);
+    renderOverviewAnalytics(activeOrders);
     const sorted = sortOrders(activeOrders);
     $("#stat-total").textContent = String(activeOrders.length);
     $("#stat-items").textContent = productCatalog.length.toLocaleString("en");
@@ -6501,6 +6576,9 @@
   setColorTheme(currentTheme);
   $("#theme-toggle").addEventListener("click", () => {
     setColorTheme(currentTheme === "dark" ? "light" : "dark", true);
+  });
+  $("#overview-period").addEventListener("change", () => {
+    renderOverviewAnalytics(orders.filter((order) => !order.deletedAt));
   });
   $$("[data-view]").forEach((link) => link.addEventListener("click", (event) => {
     event.preventDefault();

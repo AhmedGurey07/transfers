@@ -254,6 +254,7 @@ begin
       'deliveryConfirmationDecidedAt', new.data->'deliveryConfirmationDecidedAt',
       'deliveredTo', new.data->'deliveredTo',
       'deliveredToPhone', new.data->'deliveredToPhone',
+      'deliveryNote', new.data->'deliveryNote',
       'deliveredAt', new.data->'deliveredAt',
       'takenAt', new.data->'takenAt'
     ) is distinct from jsonb_build_object(
@@ -265,6 +266,7 @@ begin
       'deliveryConfirmationDecidedAt', old.data->'deliveryConfirmationDecidedAt',
       'deliveredTo', old.data->'deliveredTo',
       'deliveredToPhone', old.data->'deliveredToPhone',
+      'deliveryNote', old.data->'deliveryNote',
       'deliveredAt', old.data->'deliveredAt',
       'takenAt', old.data->'takenAt'
     ) then
@@ -355,7 +357,7 @@ create policy "Users can upload their own profile photo"
   to authenticated
   with check (
     bucket_id = 'profile-photos'
-    and public.current_workspace_role() in ('owner', 'admin', 'staff')
+    and public.current_workspace_role() in ('owner', 'admin', 'staff', 'driver')
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
@@ -366,7 +368,7 @@ create policy "Users can read their own profile photo"
   to authenticated
   using (
     bucket_id = 'profile-photos'
-    and public.current_workspace_role() in ('owner', 'admin', 'staff')
+    and public.current_workspace_role() in ('owner', 'admin', 'staff', 'driver')
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
@@ -377,12 +379,12 @@ create policy "Users can update their own profile photo"
   to authenticated
   using (
     bucket_id = 'profile-photos'
-    and public.current_workspace_role() in ('owner', 'admin', 'staff')
+    and public.current_workspace_role() in ('owner', 'admin', 'staff', 'driver')
     and (storage.foldername(name))[1] = auth.uid()::text
   )
   with check (
     bucket_id = 'profile-photos'
-    and public.current_workspace_role() in ('owner', 'admin', 'staff')
+    and public.current_workspace_role() in ('owner', 'admin', 'staff', 'driver')
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 

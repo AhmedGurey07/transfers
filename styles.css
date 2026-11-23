@@ -687,6 +687,19 @@ form button { font-size: 12px; }
 .driver-period-field select, .driver-period-field input { width: 100%; min-width: 0; height: 36px; padding: 0 7px; border: 1px solid #e3e8e1; border-radius: 6px; color: #586458; background: #fff; font: inherit; font-size: 10px; }
 .driver-period-field input:disabled { color: #929b91; background: #f7f8f6; }
 .driver-period-summary { margin: 0 0 9px; color: #7e897e; font-size: 9px; }
+#drivers-view.driver-self-view .drivers-order-browser { grid-template-columns: minmax(0,1fr); }
+#drivers-view.driver-self-view .shaafici-driver-search,
+#drivers-view.driver-self-view .shaafici-driver-options,
+#drivers-view.driver-self-view #shaafici-driver-options-empty { display: none !important; }
+#drivers-view.driver-self-view #shaafici-driver-order-count,
+#drivers-view.driver-self-view #shaafici-delivery-counts { display: none; }
+.driver-delivery-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; margin: 12px 0 16px; }
+.driver-delivery-summary > div { min-width: 0; display: grid; gap: 5px; padding: 11px; border: 1px solid #e8ede7; border-radius: 8px; background: #fafbf9; }
+.driver-delivery-summary strong { color: #3e4a40; font-size: 18px; line-height: 1; }
+.driver-delivery-summary span { color: #7e897e; font-size: 9px; }
+.driver-analytics-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px; margin: 0 0 16px; }
+.driver-analytics-grid[hidden] { display: none; }
+.driver-analytics-card { box-shadow: none; }
 .shaafici-driver-options { display: grid; gap: 8px; }
 .shaafici-driver-option { width: 100%; min-height: 57px; padding: 10px 12px; border: 1px solid #e5e9e3; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #475348; background: #fff; text-align: left; cursor: pointer; }
 .shaafici-driver-option:hover, .shaafici-driver-option:focus-visible { border-color: #9dc7a8; outline: none; background: #f7fbf7; }
@@ -732,6 +745,8 @@ form button { font-size: 12px; }
 .driver-delivery-list-item { display: flex; width: 100%; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 9px; border: 1px solid #e8ede7; border-radius: 7px; color: #445146; background: #fff; text-align: left; cursor: pointer; }
 .driver-delivery-list-item:hover, .driver-delivery-list-item:focus-visible { border-color: #9dc7a8; outline: none; background: #f7fbf7; }
 .driver-delivery-list-item[aria-pressed="true"] { border-color: #64a77a; background: #eef7f0; box-shadow: inset 3px 0 #4d9565; }
+.driver-delivery-list-item-priority { border-color: #e7c56e; background: #fffaf0; }
+.driver-delivery-list-item-priority:hover, .driver-delivery-list-item-priority:focus-visible { border-color: #d3a43a; background: #fff4d8; }
 .driver-delivery-list-identity { display: grid; min-width: 0; gap: 4px; }
 .driver-delivery-list-identity strong { font-size: 10px; }
 .driver-delivery-list-identity small { overflow: hidden; color: #7e897e; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
@@ -748,6 +763,7 @@ form button { font-size: 12px; }
 .profile-avatar-preview { width: 76px; height: 76px; margin: 0 0 12px; border: 1px solid var(--line); border-radius: 50%; object-fit: cover; }
 @media (max-width: 820px) { .users-layout, .drivers-layout { grid-template-columns: 1fr; } }
 @media (max-width: 820px) { .drivers-order-browser { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .driver-delivery-summary { grid-template-columns: repeat(2,minmax(0,1fr)); } .driver-analytics-grid { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .driver-order-panel { padding: 14px 11px; } .driver-order-navigation { flex-wrap: wrap; } .driver-order-navigation .button { font-size: 9px; } .driver-delivery-fields { grid-template-columns: 1fr; } .driver-delivery-tracker-heading { flex-direction: column; } .driver-delivery-filter, .driver-delivery-filter select { width: 100%; } .driver-delivery-list-item { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 620px) { .navigation { grid-template-columns: repeat(5,minmax(0,1fr)); } .navigation .nav-link[data-view="catalog"], .navigation .nav-link[data-view="users"]:not([hidden]) { display: flex; } }
 @media print {
@@ -992,7 +1008,15 @@ form .auth-field input::placeholder {
 .overdue-label, .approval-state { color: #a53e35; font-weight: 700; }
 .approval-state { color: #a56a13; }
 .delivery-recipient-detail { color: #586458; overflow-wrap: anywhere; }
+.order-priority-field > span { display: flex; align-items: center; gap: 8px; color: #586458; font-size: 10px; font-weight: 700; }
+.order-priority-field input { width: auto; margin: 0; accent-color: #bf8423; }
+.order-priority-field small { margin-left: 22px; color: #7e897e; font-size: 9px; }
+.order-priority-badge, .driver-priority-badge { display: inline-flex; width: max-content; align-items: center; padding: 3px 6px; border-radius: 4px; color: #875b11; background: #fff0c7; font-size: 8px; font-weight: 800; letter-spacing: .35px; }
+.driver-priority-badge[hidden] { display: none; }
+.order-priority-badge { margin-left: 6px; vertical-align: middle; }
 .approval-panel { margin-top: 18px; }
+#approval-reminder-summary.has-overdue, .approval-reminder-overdue { color: #a53e35; font-weight: 800; }
+.approval-reminder-overdue-row { background: #fff3ef; }
 .approval-request-field span { display: flex; align-items: center; gap: 7px; }
 .scheduled-report-settings { display: flex; align-items: end; gap: 12px; margin-bottom: 18px; }
 .scheduled-report-settings .panel-heading { flex: 1 1 100%; margin: 0; }
@@ -2313,7 +2337,7 @@ form .auth-field input::placeholder {
     .stat-card, .shortcut-card, .catalog-filter-panel, .catalog-filter-menu,
     .catalog-preview-dialog, .catalog-preview-grid div, .panel, .converter-result-row,
     .drivers-manager, .driver-suggestions, .driver-suggestion, .preview-card,
-    .driver-order-panel, .driver-order-summary > div, .shaafici-driver-option,
+    .driver-order-panel, .driver-order-summary > div, .driver-delivery-summary > div, .shaafici-driver-option,
     .driver-delivery-form, .driver-delivery-recipient, .driver-delivery-list-item,
     .search-box, .filter-select, .date-filter-field, .catalog-row-detail) {
     color: var(--ink);
@@ -2323,7 +2347,7 @@ form .auth-field input::placeholder {
   }
   html[data-theme="dark"] :is(h1, h2, h3, .breadcrumb strong, .sidebar-account-details strong,
     .shortcut-card strong, .panel-heading h2, .converter-result-row > strong,
-    .driver-order-summary strong, .driver-order-items-title, .driver-delivery-tracker-heading h3,
+    .driver-order-summary strong, .driver-delivery-summary strong, .driver-order-items-title, .driver-delivery-tracker-heading h3,
     .driver-delivery-recipient span,
     .driver-delivery-list-identity strong, .catalog-row-detail strong,
     .catalog-preview-dialog h2, .catalog-preview-grid strong, .empty-state strong) {
@@ -2335,7 +2359,7 @@ form .auth-field input::placeholder {
     .catalog-uom-option, .panel-required, .item-count, .converter-quantity,
     .drivers-manager summary, .drivers-manager > p, .drivers-manager-actions > span,
     .driver-period-field > span, .driver-period-summary, .shaafici-driver-identity small,
-    .shaafici-driver-order-total, .driver-order-items li, .preview-item,
+    .shaafici-driver-order-total, .driver-delivery-summary span, .driver-order-items li, .preview-item,
     .driver-delivery-form > p, .driver-delivery-feedback, .driver-delivery-recipient strong, .driver-delivery-actions > span,
     .driver-delivery-tracker-heading p, .driver-delivery-filter, .driver-delivery-list-identity small,
     .driver-delivery-list-empty,
@@ -2470,6 +2494,15 @@ form .auth-field input::placeholder {
   }
   html[data-theme="dark"] .low-stock-row { background: #392c1f !important; }
   html[data-theme="dark"] .order-overdue-row { background: #382624; }
+  html[data-theme="dark"] .order-priority-field > span { color: var(--ink); }
+  html[data-theme="dark"] .order-priority-field small { color: var(--ink-soft); }
+  html[data-theme="dark"] .order-priority-badge,
+  html[data-theme="dark"] .driver-priority-badge { color: #f1d49a; background: #3a3020; }
+  html[data-theme="dark"] .driver-analytics-card { border-color: var(--line); background: var(--surface); }
+  html[data-theme="dark"] .driver-analytics-card .analytics-bar-track { background: var(--surface-raised); }
+  html[data-theme="dark"] .approval-reminder-overdue-row { background: #382624; }
+  html[data-theme="dark"] #approval-reminder-summary.has-overdue,
+  html[data-theme="dark"] .approval-reminder-overdue { color: #ffaaa1; }
   html[data-theme="dark"] .notification-unread { background: #21382a; }
   html[data-theme="dark"] .warehouse-transfer-row td { color: #f0c183 !important; background: #392e20; }
   html[data-theme="dark"] .returned-delivered-details { border-color: #623d39; background: #382725; }
@@ -2493,6 +2526,9 @@ form .auth-field input::placeholder {
   html[data-theme="dark"] .driver-delivery-list-item:hover,
   html[data-theme="dark"] .driver-delivery-list-item:focus-visible,
   html[data-theme="dark"] .driver-delivery-list-item[aria-pressed="true"] { border-color: #52775d; background: #263a2b; }
+  html[data-theme="dark"] .driver-delivery-list-item-priority { border-color: #725c2f; background: #302919; }
+  html[data-theme="dark"] .driver-delivery-list-item-priority:hover,
+  html[data-theme="dark"] .driver-delivery-list-item-priority:focus-visible { border-color: #9b7a39; background: #3a3020; }
   html[data-theme="dark"] .driver-delivery-list-status-delivered { color: #9cddb0; background: #22382a; }
   html[data-theme="dark"] .driver-delivery-list-status-awaiting { color: #f1c87d; background: #3a3020; }
   html[data-theme="dark"] .driver-delivery-list-status-rejected { color: #ffaaa1; background: #402725; }

@@ -7,12 +7,12 @@
   <link rel="manifest" href="manifest.webmanifest?v=20261109">
   <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=202611230006">
+  <link rel="stylesheet" href="styles.css?v=202611230009">
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="vendor/html2canvas/html2canvas.min.js" defer></script>
-  <script src="app.js?v=202611230009" defer></script>
+  <script src="app.js?v=202611230016" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -166,7 +166,7 @@
         <div class="filter-bar order-filters"><label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search customer, product, driver, or order" aria-label="Search orders"></label><label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="In progress">In progress</option><option value="Delivered">Delivered</option><option value="Cancelled">Cancelled</option><option value="__overdue__">Overdue</option></select></label><label class="filter-select"><span class="sr-only">Filter by branch</span><input id="order-branch-filter" type="search" placeholder="Branch"></label><label class="filter-select"><span class="sr-only">Filter by driver</span><input id="order-driver-filter" type="search" placeholder="Driver"></label><label class="filter-select"><span class="sr-only">Order date from</span><input id="order-date-from-filter" type="date"></label><label class="filter-select"><span class="sr-only">Order date to</span><input id="order-date-to-filter" type="date"></label></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th data-order-sort="id">ORDER</th><th data-order-sort="customer">CUSTOMER</th><th data-order-sort="transferId">TRANSFER ID</th><th data-order-sort="date">DATE</th><th data-order-sort="status">STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="all-orders"></tbody></table></div><div class="empty-state" id="orders-empty"><span class="empty-icon">⌕</span><strong>No matching orders</strong><span>Try changing your search or create a new order.</span></div></div>
         <section class="panel approval-panel" id="approvals-panel">
-          <div class="panel-heading"><div><h2>Approval requests</h2><p>Order, stock adjustment, and driver delivery requests. Only workspace admins can approve or reject.</p></div></div>
+          <div class="panel-heading"><div><h2>Approval requests</h2><p>Order, stock adjustment, and driver delivery requests. Only workspace admins can approve or reject.</p><p id="approval-reminder-summary">Delivery confirmations waiting at least 4 hours are flagged here.</p></div></div>
           <div class="table-scroll"><table><thead><tr><th>TYPE</th><th>REQUEST</th><th>REQUESTED BY</th><th>WHEN</th><th>STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="approval-requests"></tbody></table></div>
           <div class="empty-state" id="approvals-empty" hidden><strong>No approval requests</strong><span>Requests needing review will appear here.</span></div>
         </section>
@@ -391,6 +391,7 @@
                   </details>
                   <label class="field"><span>Created by</span><select name="preparedBy"><option value="Eng Ahmed Gurey">Eng Ahmed Gurey</option><option value="Hamze Ali">Hamze Ali</option></select></label>
                   <label class="field field-wide"><span>Notes</span><textarea name="notes" rows="2" maxlength="250" placeholder="Add delivery instructions or other details"></textarea></label>
+                  <label class="field field-wide order-priority-field"><span><input id="order-priority" type="checkbox"> Priority transfer</span><small>Priority transfers appear first and are highlighted in the driver's queue.</small></label>
                 </div>
               </article>
               <article class="panel converter-panel" id="converter-panel" hidden>
@@ -466,15 +467,33 @@
           </section>
         </div>
         <section class="panel shaafici-driver-panel" id="shaafici-driver-panel" aria-labelledby="shaafici-driver-panel-title" hidden>
-          <div class="panel-heading"><div><h2 id="shaafici-driver-panel-title">SHAAFICI Drivers</h2><p>Select a driver to review their orders one at a time.</p></div></div>
+          <div class="panel-heading"><div><h2 id="shaafici-driver-panel-title">SHAAFICI Drivers</h2><p id="shaafici-driver-panel-description">Select a driver to review their orders one at a time.</p></div></div>
+          <div class="driver-delivery-summary" aria-label="Delivery totals">
+            <div><strong id="shaafici-summary-assigned">0</strong><span>Assigned</span></div>
+            <div><strong id="shaafici-summary-delivered">0</strong><span>Delivered</span></div>
+            <div><strong id="shaafici-summary-awaiting">0</strong><span>Awaiting approval</span></div>
+            <div><strong id="shaafici-summary-not-delivered">0</strong><span>Not delivered</span></div>
+          </div>
+          <section class="driver-analytics-grid" id="shaafici-driver-activity" aria-label="Driver activity charts" hidden>
+            <article class="analytics-card driver-analytics-card">
+              <div class="analytics-card-heading"><h3>Branches worked most</h3><span>Assigned transfers</span></div>
+              <ol class="analytics-list" id="shaafici-driver-branch-chart"></ol>
+              <p class="analytics-empty" id="shaafici-driver-branch-empty" hidden>No branch activity in this period.</p>
+            </article>
+            <article class="analytics-card driver-analytics-card">
+              <div class="analytics-card-heading"><h3>Daily activity</h3><span>Busiest dates · assigned transfers</span></div>
+              <ol class="analytics-list" id="shaafici-driver-day-chart"></ol>
+              <p class="analytics-empty" id="shaafici-driver-day-empty" hidden>No daily activity in this period.</p>
+            </article>
+          </section>
           <div class="drivers-order-browser">
-            <section class="driver-chooser-panel" aria-label="Choose a driver">
+            <section class="driver-chooser-panel" id="shaafici-driver-chooser" aria-label="Driver filters and selection">
               <div class="driver-period-controls">
                 <label class="driver-period-field"><span>COUNT BY</span><select id="shaafici-driver-period"><option value="all">All time</option><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="year">Year</option></select></label>
                 <label class="driver-period-field"><span>REFERENCE DATE</span><input id="shaafici-driver-date" type="date" disabled></label>
               </div>
               <p class="driver-period-summary" id="shaafici-driver-period-summary">All time</p>
-              <label class="search-box shaafici-driver-search">
+              <label class="search-box shaafici-driver-search" id="shaafici-driver-search-wrap">
                 <span aria-hidden="true">⌕</span>
                 <input id="shaafici-driver-search" type="search" aria-label="Search drivers by name or phone number" placeholder="Search by name or phone number" autocomplete="off">
               </label>
@@ -501,6 +520,10 @@
                     <strong>DELIVERY RECIPIENT</strong>
                     <span id="shaafici-delivery-recipient-value"></span>
                   </div>
+                  <div class="driver-delivery-recipient" id="shaafici-delivery-note-view" role="group" aria-label="Delivery note" hidden>
+                    <strong>DELIVERY NOTE</strong>
+                    <span id="shaafici-delivery-note-value"></span>
+                  </div>
                   <button class="button button-secondary driver-take-button" id="shaafici-driver-take" type="button" hidden>Mark transfer as taken</button>
                   <form class="driver-delivery-form" id="shaafici-driver-delivery-form" hidden>
                     <p>Enter who received this transfer. It will be marked delivered after an owner or admin approves it.</p>
@@ -512,6 +535,9 @@
                         <input class="item-input" id="shaafici-delivered-to-phone" type="tel" maxlength="30" autocomplete="tel" required>
                       </label>
                     </div>
+                    <label class="field driver-delivery-note-field">Delivery note (optional)
+                      <textarea class="item-input" id="shaafici-delivery-note" maxlength="1000" rows="3" placeholder="Add any details about this delivery"></textarea>
+                    </label>
                     <div class="driver-delivery-actions">
                       <button class="button button-primary" id="shaafici-delivery-submit" type="submit">Submit delivery for approval</button>
                       <span id="shaafici-delivery-status" role="status" aria-live="polite"></span>

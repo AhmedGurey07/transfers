@@ -3007,6 +3007,7 @@
           driverPhone: order.driverPhone || "",
           preparedBy: order.preparedBy || "",
           notes: order.notes || "",
+          priority: Boolean(order.priority),
           status: normalizeOrderStatus(order.status),
           approvalStatus: ["pending", "approved", "rejected"].includes(order.approvalStatus)
             ? order.approvalStatus : "",
@@ -3024,6 +3025,7 @@
           deliveryConfirmationDecidedAt: Number(order.deliveryConfirmationDecidedAt) || 0,
           deliveredTo: order.deliveredTo || "",
           deliveredToPhone: order.deliveredToPhone || "",
+          deliveryNote: typeof order.deliveryNote === "string" ? order.deliveryNote : "",
           deliveredAt: Number(order.deliveredAt) || 0,
           takenAt: Number(order.takenAt) || 0,
           deletedAt: Number(order.deletedAt) || 0,
@@ -3255,7 +3257,10 @@
       if (!assignedToDriver || !dateRange) return assignedToDriver;
       const orderDate = getOrderDateForDriverFilter(order);
       return orderDate >= dateRange.startDate && orderDate <= dateRange.endDate;
-    }).sort((left, right) => (Number(right.createdAt) || 0) - (Number(left.createdAt) || 0));
+    }).sort((left, right) =>
+      Number(Boolean(right.priority)) - Number(Boolean(left.priority))
+      || (Number(right.createdAt) || 0) - (Number(left.createdAt) || 0)
+    );
   }
 
   function deliveryProgressLabel(order) {
@@ -3264,6 +3269,41 @@
     if (order.deliveryConfirmationStatus === "rejected") return "Rejected — retry";
     if (normalizeOrderStatus(order.status) === "Cancelled") return "Cancelled";
     return "Not delivered";
+  }
+
+  function updateDriverDeliverySummary(assigned, delivered, awaiting, notDelivered) {
+    $("#shaafici-summary-assigned").textContent = String(assigned);
+    $("#shaafici-summary-delivered").textContent = String(delivered);
+    $("#shaafici-summary-awaiting").textContent = String(awaiting);
+    $("#shaafici-summary-not-delivered").textContent = String(notDelivered);
+  }
+
+  function renderDriverAnalytics(driverOrders) {
+    const branchOrders = new Map();
+    const dailyOrders = new Map();
+    driverOrders.forEach((order) => {
+      const branch = String(order.branch || "").trim() || "Unassigned";
+      branchOrders.set(branch, (branchOrders.get(branch) || 0) + 1);
+      const orderDate = getOrderDateForDriverFilter(order);
+      if (orderDate) {
+        dailyOrders.set(orderDate, (dailyOrders.get(orderDate) || 0) + 1);
+      }
+    });
+    const dailyActivity = new Map([...dailyOrders.entries()]
+      .map(([date, count]) => [formatDate(date), count]));
+    renderOverviewChart(
+      $("#shaafici-driver-branch-chart"),
+      $("#shaafici-driver-branch-empty"),
+      branchOrders,
+      "transfers"
+    );
+    renderOverviewChart(
+      $("#shaafici-driver-day-chart"),
+      $("#shaafici-driver-day-empty"),
+      dailyActivity,
+      "transfers",
+      7
+    );
   }
 
   function sortDriversByOrderCount(driverList, dateRange = null) {
@@ -3331,6 +3371,8 @@
 
     const selectedDriver = orderedDrivers.find((driver) => driver.phone === selectedShaaficiDriverPhone);
     if (!selectedDriver) {
+      $("#shaafici-driver-activity").hidden = true;
+      updateDriverDeliverySummary(0, 0, 0, 0);
       $("#shaafici-driver-take").hidden = true;
       $("#shaafici-driver-delivery-form").hidden = true;
       $("#shaafici-delivery-feedback").hidden = true;
@@ -3343,7 +3385,10 @@
     }
 
     const driverOrders = getOrdersForDriver(selectedDriver, dateRange);
+    $("#shaafici-driver-activity").hidden = false;
+    renderDriverAnalytics(driverOrders);
     if (!driverOrders.length) {
+      updateDriverDeliverySummary(0, 0, 0, 0);
       $("#shaafici-delivery-counts").textContent = "0 transfers";
       $("#shaafici-driver-delivery-list").replaceChildren();
       $("#shaafici-driver-delivery-list-empty").hidden =
@@ -3362,6 +3407,7 @@
     const deliveredCount = driverOrders.filter((order) => normalizeOrderStatus(order.status) === "Delivered").length;
     const awaitingCount = driverOrders.filter((order) => order.deliveryConfirmationStatus === "pending").length;
     const notDeliveredCount = driverOrders.length - deliveredCount - awaitingCount;
+    updateDriverDeliverySummary(driverOrders.length, deliveredCount, awaitingCount, notDeliveredCount);
     $("#shaafici-driver-order-count").textContent =
       `${driverOrders.length} assigned · ${deliveredCount} delivered · ${awaitingCount} awaiting approval · ${notDeliveredCount} not delivered${dateRange ? " in selected period" : ""}`;
     const deliveryFilter = $("#shaafici-driver-delivery-filter").value;
@@ -3392,11 +3438,16 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "driver-delivery-list-item";
+      button.classList.toggle("driver-delivery-list-item-priority", Boolean(listedOrder.priority));
       button.setAttribute("aria-pressed", String(index === selectedShaaficiOrderIndex));
       const identity = document.createElement("span");
       identity.className = "driver-delivery-list-identity";
       const orderId = document.createElement("strong");
       orderId.textContent = listedOrder.id;
+      const priorityBadge = document.createElement("span");
+      priorityBadge.className = "driver-priority-badge";
+      priorityBadge.textContent = "PRIORITY";
+      priorityBadge.hidden = !listedOrder.priority;
       const details = document.createElement("small");
       details.textContent = [listedOrder.transferId, listedOrder.customer].filter(Boolean).join(" · ") || "No transfer details";
       const status = document.createElement("span");
@@ -3409,7 +3460,7 @@
             : "not-delivered";
       status.className = `driver-delivery-list-status driver-delivery-list-status-${deliveryStatusClass}`;
       status.textContent = deliveryProgressLabel(listedOrder);
-      identity.append(orderId, details);
+      identity.append(orderId, priorityBadge, details);
       button.append(identity, status);
       button.addEventListener("click", () => {
         selectedShaaficiOrderIndex = index;
@@ -3469,6 +3520,7 @@
     deliveryForm.hidden = !canSubmitDelivery;
     $("#shaafici-delivered-to").value = order.deliveredTo || "";
     $("#shaafici-delivered-to-phone").value = order.deliveredToPhone || "";
+    $("#shaafici-delivery-note").value = order.deliveryNote || "";
     $("#shaafici-delivery-status").textContent = "";
     const deliveryFeedback = $("#shaafici-delivery-feedback");
     deliveryFeedback.textContent = order.deliveryConfirmationStatus === "pending"
@@ -3486,6 +3538,9 @@
     $("#shaafici-delivery-recipient-value").textContent = recipientValue;
     $("#shaafici-delivery-recipient").hidden =
       !canViewRecipient || !order.deliveryConfirmationStatus || !recipientValue;
+    $("#shaafici-delivery-note-value").textContent = order.deliveryNote || "";
+    $("#shaafici-delivery-note-view").hidden =
+      !canViewRecipient || !order.deliveryConfirmationStatus || !order.deliveryNote;
   }
 
   async function saveShaaficiDriverOrderAction(order, action, details = {}) {
@@ -3538,7 +3593,8 @@
     try {
       await saveShaaficiDriverOrderAction(order, "deliver", {
         deliveredTo: $("#shaafici-delivered-to").value.trim(),
-        deliveredToPhone: $("#shaafici-delivered-to-phone").value.trim()
+        deliveredToPhone: $("#shaafici-delivered-to-phone").value.trim(),
+        deliveryNote: $("#shaafici-delivery-note").value.trim()
       });
     } catch (error) {
       console.error("Could not submit the driver delivery confirmation.", error);
@@ -4170,7 +4226,7 @@
   }
 
   function setView(name, { recordHistory = true, confirmUnsaved = true } = {}) {
-    if (cloudDeployment && cloudRole === "driver" && name !== "drivers") {
+    if (cloudDeployment && cloudRole === "driver" && name !== "drivers" && name !== "profile") {
       name = "drivers";
       recordHistory = false;
       confirmUnsaved = false;
@@ -5483,6 +5539,7 @@
       driverPhone: data.get("driverPhone").trim(),
       preparedBy: data.get("preparedBy").trim(),
       notes: data.get("notes").trim(),
+      priority: $("#order-priority").checked,
       status: editingId ? normalizeOrderStatus(previousOrder?.status) : "Pending",
       approvalStatus: previousOrder?.approvalStatus || "",
       approvalRequestedBy: previousOrder?.approvalRequestedBy || "",
@@ -5498,6 +5555,7 @@
       deliveryConfirmationDecidedAt: previousOrder?.deliveryConfirmationDecidedAt || 0,
       deliveredTo: previousOrder?.deliveredTo || "",
       deliveredToPhone: previousOrder?.deliveredToPhone || "",
+      deliveryNote: previousOrder?.deliveryNote || "",
       deliveredAt: previousOrder?.deliveredAt || 0,
       takenAt: previousOrder?.takenAt || 0,
       items: getItems(),
@@ -5517,6 +5575,7 @@
       driverPhone: data.get("driverPhone"),
       preparedBy: data.get("preparedBy"),
       notes: data.get("notes"),
+      priority: $("#order-priority").checked,
       items: getItems()
     });
   }
@@ -5548,6 +5607,11 @@
       && ["pending", "approved", "rejected"].includes(order.deliveryConfirmationStatus)
       ? `<small class="delivery-recipient-detail">Recipient: ${escapeAttribute(order.deliveredTo || "—")} · ${escapeAttribute(order.deliveredToPhone || "—")}</small>`
       : "";
+    const deliveryNoteNotice = ["owner", "admin"].includes(cloudRole)
+      && ["pending", "approved", "rejected"].includes(order.deliveryConfirmationStatus)
+      && order.deliveryNote
+      ? `<small class="delivery-recipient-detail">Delivery note: ${escapeAttribute(order.deliveryNote)}</small>`
+      : "";
     const approvalNotice = order.approvalStatus === "pending"
       ? "Awaiting order approval"
       : order.deliveryConfirmationStatus === "pending"
@@ -5561,11 +5625,11 @@
     row.tabIndex = 0;
     row.setAttribute("aria-label", `Open order ${order.id}`);
     row.innerHTML = `
-      <td><span class="order-number">${escapeAttribute(order.id)}</span></td>
+      <td><span class="order-number">${escapeAttribute(order.id)}</span>${order.priority ? '<span class="order-priority-badge">PRIORITY</span>' : ""}</td>
       <td class="customer-cell">${escapeAttribute(order.customer)}${overdue ? '<small class="overdue-label">OVERDUE</small>' : ""}</td>
       <td>${escapeAttribute(order.transferId || "—")}</td>
       <td>${formatDate(order.date)}</td>
-      <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button>${approvalNotice ? `<small class="approval-state">${escapeAttribute(approvalNotice)}</small>` : ""}${deliveryRecipientNotice}</td>
+      <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button>${approvalNotice ? `<small class="approval-state">${escapeAttribute(approvalNotice)}</small>` : ""}${deliveryRecipientNotice}${deliveryNoteNotice}</td>
       <td class="row-actions"><button class="icon-button" type="button" aria-label="Open order ${escapeAttribute(order.id)}" title="Open order">↗</button><button class="order-action-button" type="button" data-action="history" aria-label="View history for ${escapeAttribute(order.id)}">History</button><button class="order-action-button order-delete-button" type="button" data-action="delete" aria-label="Delete order ${escapeAttribute(order.id)}">Delete</button></td>`;
     row.addEventListener("click", (event) => {
       if (event.target.closest("button, a, input, select, textarea")) return;
@@ -5629,10 +5693,10 @@
     return { start, end: selectedDate };
   }
 
-  function renderOverviewChart(target, empty, values, unit) {
+  function renderOverviewChart(target, empty, values, unit, limit = 5) {
     const entries = [...values.entries()]
       .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], undefined, { sensitivity: "base" }))
-      .slice(0, 5);
+      .slice(0, limit);
     target.replaceChildren(...entries.map(([label, count]) => {
       const row = document.createElement("li");
       row.className = "analytics-row";
@@ -5644,12 +5708,13 @@
       name.title = label;
       const value = document.createElement("span");
       value.className = "analytics-row-value";
-      value.textContent = `${count.toLocaleString("en")} ${unit}`;
+      const countLabel = `${count.toLocaleString("en")} ${count === 1 ? unit.replace(/s$/, "") : unit}`;
+      value.textContent = countLabel;
       heading.append(name, value);
       const track = document.createElement("div");
       track.className = "analytics-bar-track";
       track.setAttribute("role", "meter");
-      track.setAttribute("aria-label", `${label}: ${count} ${unit}`);
+      track.setAttribute("aria-label", `${label}: ${countLabel}`);
       track.setAttribute("aria-valuemin", "0");
       track.setAttribute("aria-valuemax", String(entries[0][1]));
       track.setAttribute("aria-valuenow", String(count));
@@ -5715,9 +5780,45 @@
     renderNotifications();
   }
 
+  const DELIVERY_APPROVAL_REMINDER_MS = 4 * 60 * 60 * 1000;
+
+  function formatApprovalWait(timestamp) {
+    const elapsedMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+    const hours = Math.floor(elapsedMinutes / 60);
+    const minutes = elapsedMinutes % 60;
+    return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+  }
+
+  function refreshApprovalReminderIndicators() {
+    const canReviewDeliveryDetails = ["owner", "admin"].includes(cloudRole);
+    let overdueCount = 0;
+    $$("#approval-requests tr[data-request-type]").forEach((row) => {
+      const timestamp = Number(row.dataset.requestTimestamp) || 0;
+      const overdue = canReviewDeliveryDetails
+        && row.dataset.requestType === "Delivery confirmation"
+        && timestamp > 0
+        && Date.now() - timestamp >= DELIVERY_APPROVAL_REMINDER_MS;
+      const statusCell = row.children[4];
+      if (statusCell) {
+        statusCell.textContent = overdue ? `Review overdue · ${formatApprovalWait(timestamp)}` : "Pending";
+        statusCell.classList.toggle("approval-reminder-overdue", overdue);
+      }
+      row.classList.toggle("approval-reminder-overdue-row", overdue);
+      if (overdue) overdueCount += 1;
+    });
+
+    const summary = $("#approval-reminder-summary");
+    if (!summary) return;
+    summary.textContent = canReviewDeliveryDetails && overdueCount
+      ? `${overdueCount} delivery confirmation${overdueCount === 1 ? " has" : "s have"} waited at least 4 hours.`
+      : "Delivery confirmations waiting at least 4 hours are flagged here.";
+    summary.classList.toggle("has-overdue", canReviewDeliveryDetails && overdueCount > 0);
+  }
+
   function renderApprovalRequests() {
     const target = $("#approval-requests");
     if (!target) return;
+    const canReviewDeliveryDetails = ["owner", "admin"].includes(cloudRole);
     const requests = [
       ...orders.filter((order) => !order.deletedAt && order.approvalStatus === "pending")
         .map((order) => ({
@@ -5731,7 +5832,13 @@
         .map((order) => ({
           type: "Delivery confirmation",
           id: order.id,
-          summary: `${order.id} · ${order.transferId || "No transfer ID"} · ${order.customer}`,
+          summary: [
+            `${order.id} · ${order.transferId || "No transfer ID"} · ${order.customer}`,
+            canReviewDeliveryDetails && order.deliveredTo
+              ? `Recipient: ${order.deliveredTo}${order.deliveredToPhone ? ` (${order.deliveredToPhone})` : ""}`
+              : "",
+            canReviewDeliveryDetails && order.deliveryNote ? `Note: ${order.deliveryNote}` : ""
+          ].filter(Boolean).join(" · "),
           requester: order.deliveryConfirmationRequestedBy || order.driver || "Driver",
           timestamp: Number(order.deliveryConfirmationRequestedAt) || Number(order.createdAt) || 0
         })),
@@ -5746,6 +5853,8 @@
     ].sort((left, right) => right.timestamp - left.timestamp);
     target.replaceChildren(...requests.map((request) => {
       const row = document.createElement("tr");
+      row.dataset.requestType = request.type;
+      row.dataset.requestTimestamp = String(request.timestamp || 0);
       [request.type, request.summary, request.requester,
         request.timestamp ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(request.timestamp) : "—",
         "Pending"].forEach((value) => {
@@ -5769,6 +5878,7 @@
       row.append(actions);
       return row;
     }));
+    refreshApprovalReminderIndicators();
     labelTableRows(target);
     $("#approvals-empty").hidden = requests.length > 0;
   }
@@ -6538,6 +6648,7 @@
     form.elements.driverPhone.value = order.driverPhone || "";
     form.elements.preparedBy.value = normalizeCreatedBy(order.preparedBy);
     form.elements.notes.value = order.notes || "";
+    $("#order-priority").checked = Boolean(order.priority);
     itemsBody.replaceChildren();
     (order.items.length ? order.items : [{}]).forEach(createItemRow);
     updateConverterVisibility();
@@ -6573,6 +6684,7 @@
       ["Driver phone", "driverPhone"],
       ["Created by", "preparedBy"],
       ["Notes", "notes"],
+      ["Priority", "priority"],
       ["Approval request", "approvalStatus"],
       ["Delivery confirmation", "deliveryConfirmationStatus"],
       ["Items", "items"]
@@ -7293,7 +7405,9 @@
     fitProductDescriptions($("#paper-items"));
   });
   window.setInterval(runScheduledReports, 60000);
+  window.setInterval(refreshApprovalReminderIndicators, 60000);
   window.addEventListener("focus", runScheduledReports);
+  window.addEventListener("focus", refreshApprovalReminderIndicators);
   window.addEventListener("beforeunload", (event) => {
     if (!hasUnsavedOrderChanges()) return;
     event.preventDefault();
@@ -7313,16 +7427,24 @@
     $("#add-catalog-product").hidden = cloudDeployment && !["owner", "admin"].includes(cloudRole);
     $("#upload-workbook").hidden = cloudDeployment && !["owner", "admin"].includes(cloudRole);
     $("#approvals-panel").hidden = !cloudDeployment || isDriver;
-    $("#account-avatar").hidden = !cloudDeployment || isDriver;
-    $("#sidebar-account-profile").hidden = isDriver;
+    $("#account-avatar").hidden = !cloudDeployment;
+    $("#sidebar-account-profile").hidden = false;
     $(".drivers-layout").hidden = isDriver;
     $("#show-shaafici-drivers").hidden = isDriver;
     $("#shaafici-driver-panel").hidden = !isDriver;
+    $("#drivers-view").classList.toggle("driver-self-view", isDriver);
+    $("#shaafici-driver-search-wrap").hidden = isDriver;
+    if (isDriver) $("#shaafici-driver-search").value = "";
+    $("#shaafici-driver-chooser").setAttribute("aria-label", isDriver ? "Delivery period filters" : "Driver filters and selection");
     $("#show-shaafici-drivers").setAttribute("aria-expanded", String(isDriver));
-    $("#drivers-title").textContent = isDriver ? "My driver orders" : "Drivers";
+    $("#drivers-title").textContent = isDriver ? "My deliveries" : "Drivers";
     $("#drivers-view .page-heading .welcome-copy").textContent = isDriver
-      ? "View the orders assigned to your linked driver."
+      ? "Review your assigned transfers and delivery status."
       : "Browse saved drivers and review their orders.";
+    $("#shaafici-driver-panel-title").textContent = isDriver ? "My delivery queue" : "SHAAFICI Drivers";
+    $("#shaafici-driver-panel-description").textContent = isDriver
+      ? "Your assigned transfers and delivery progress."
+      : "Select a driver to review their orders one at a time.";
     renderAccountAvatar(cloudUser);
     $("#welcome-greeting").textContent = greetingForTime();
     $("#welcome-user").textContent = usernameForUser(cloudUser);

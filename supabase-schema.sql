@@ -217,6 +217,9 @@ begin
       if coalesce(new.data->>'approvalStatus', '') in ('approved', 'rejected') then
         raise exception 'Only a workspace admin can decide order approvals.';
       end if;
+      if coalesce(new.data->>'deliveryConfirmationStatus', '') in ('pending', 'approved', 'rejected') then
+        raise exception 'Only the assigned driver and workspace admins can manage delivery confirmations.';
+      end if;
       if new.data->>'approvalStatus' = 'pending'
         and new.data->>'approvalRequestedById' is distinct from auth.uid()::text then
         raise exception 'Staff can only submit their own order approval requests.';
@@ -241,6 +244,31 @@ begin
         and new.data->>'approvalRequestedById' is distinct from auth.uid()::text then
         raise exception 'Staff can only submit their own order approval requests.';
       end if;
+    end if;
+    if jsonb_build_object(
+      'deliveryConfirmationStatus', new.data->'deliveryConfirmationStatus',
+      'deliveryConfirmationRequestedBy', new.data->'deliveryConfirmationRequestedBy',
+      'deliveryConfirmationRequestedById', new.data->'deliveryConfirmationRequestedById',
+      'deliveryConfirmationRequestedAt', new.data->'deliveryConfirmationRequestedAt',
+      'deliveryConfirmationDecidedBy', new.data->'deliveryConfirmationDecidedBy',
+      'deliveryConfirmationDecidedAt', new.data->'deliveryConfirmationDecidedAt',
+      'deliveredTo', new.data->'deliveredTo',
+      'deliveredToPhone', new.data->'deliveredToPhone',
+      'deliveredAt', new.data->'deliveredAt',
+      'takenAt', new.data->'takenAt'
+    ) is distinct from jsonb_build_object(
+      'deliveryConfirmationStatus', old.data->'deliveryConfirmationStatus',
+      'deliveryConfirmationRequestedBy', old.data->'deliveryConfirmationRequestedBy',
+      'deliveryConfirmationRequestedById', old.data->'deliveryConfirmationRequestedById',
+      'deliveryConfirmationRequestedAt', old.data->'deliveryConfirmationRequestedAt',
+      'deliveryConfirmationDecidedBy', old.data->'deliveryConfirmationDecidedBy',
+      'deliveryConfirmationDecidedAt', old.data->'deliveryConfirmationDecidedAt',
+      'deliveredTo', old.data->'deliveredTo',
+      'deliveredToPhone', old.data->'deliveredToPhone',
+      'deliveredAt', old.data->'deliveredAt',
+      'takenAt', old.data->'takenAt'
+    ) then
+      raise exception 'Only the assigned driver and workspace admins can manage delivery confirmations.';
     end if;
     return new;
   end if;

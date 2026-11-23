@@ -279,6 +279,7 @@
     ["unit", "UOM"], ["statuses", "STS"]
   ];
   let catalogPage = 1;
+  let catalogActionMenuCleanup = null;
   let catalogSearchFrame = 0;
 
   function getFilteredCatalogRows() {
@@ -364,6 +365,7 @@
   }
 
   function renderProductCatalogTable({ preservePage = false } = {}) {
+    catalogActionMenuCleanup?.();
     if (!preservePage) catalogPage = 1;
     const headings = $("#catalog-headings");
     if (!headings.childElementCount) {
@@ -491,23 +493,55 @@
       expand.addEventListener("click", (event) => {
         event.stopPropagation();
         const expanded = !actionButtons.hidden;
-        actionButtons.hidden = expanded;
-        actions.classList.toggle("catalog-row-actions-open", !expanded);
         if (expanded) {
-          actionButtons.classList.remove("catalog-row-action-buttons-above");
-        } else {
-          const scrollArea = actions.closest(".table-scroll");
-          const scrollBounds = scrollArea?.getBoundingClientRect();
-          const viewportBottom = Math.min(window.innerHeight, scrollBounds?.bottom ?? window.innerHeight);
-          const spaceBelow = viewportBottom - actions.getBoundingClientRect().bottom;
-          actionButtons.classList.toggle(
-            "catalog-row-action-buttons-above",
-            spaceBelow < actionButtons.getBoundingClientRect().height + 8
-          );
+          catalogActionMenuCleanup?.();
+          return;
         }
-        expand.setAttribute("aria-expanded", String(!expanded));
-        expand.setAttribute("aria-label", `${expanded ? "Show" : "Hide"} actions for ${item.product}`);
-        expand.title = expanded ? "Show product actions" : "Hide product actions";
+
+        catalogActionMenuCleanup?.();
+        actionButtons.hidden = false;
+        actions.classList.add("catalog-row-actions-open");
+        expand.setAttribute("aria-expanded", "true");
+        expand.setAttribute("aria-label", `Hide actions for ${item.product}`);
+        expand.title = "Hide product actions";
+
+        const anchorBounds = actions.getBoundingClientRect();
+        const menuBounds = actionButtons.getBoundingClientRect();
+        const viewportPadding = 12;
+        const menuGap = 5;
+        const spaceBelow = window.innerHeight - anchorBounds.bottom - viewportPadding;
+        const spaceAbove = anchorBounds.top - viewportPadding;
+        const placeBelow = spaceBelow >= menuBounds.height + menuGap || spaceBelow >= spaceAbove;
+        const proposedTop = placeBelow
+          ? anchorBounds.bottom + menuGap
+          : anchorBounds.top - menuBounds.height - menuGap;
+        const maxTop = Math.max(viewportPadding, window.innerHeight - menuBounds.height - viewportPadding);
+        const left = Math.min(
+          Math.max(viewportPadding, anchorBounds.right - menuBounds.width),
+          Math.max(viewportPadding, window.innerWidth - menuBounds.width - viewportPadding)
+        );
+        actionButtons.style.top = `${Math.min(Math.max(viewportPadding, proposedTop), maxTop)}px`;
+        actionButtons.style.left = `${left}px`;
+
+        const closeOnViewportChange = (changeEvent) => {
+          if (changeEvent.type === "scroll" && actionButtons.contains(changeEvent.target)) return;
+          catalogActionMenuCleanup?.();
+        };
+        const closeMenu = () => {
+          window.removeEventListener("scroll", closeOnViewportChange, true);
+          window.removeEventListener("resize", closeOnViewportChange);
+          actionButtons.hidden = true;
+          actionButtons.style.removeProperty("top");
+          actionButtons.style.removeProperty("left");
+          actions.classList.remove("catalog-row-actions-open");
+          expand.setAttribute("aria-expanded", "false");
+          expand.setAttribute("aria-label", `Show actions for ${item.product}`);
+          expand.title = "Show product actions";
+          if (catalogActionMenuCleanup === closeMenu) catalogActionMenuCleanup = null;
+        };
+        catalogActionMenuCleanup = closeMenu;
+        window.addEventListener("scroll", closeOnViewportChange, true);
+        window.addEventListener("resize", closeOnViewportChange);
       });
       if (!cloudDeployment || ["owner", "admin"].includes(cloudRole)) actionButtons.append(edit);
       actionButtons.append(add, history);
@@ -526,8 +560,10 @@
       ? `Showing ${firstShown.toLocaleString("en")}–${lastShown.toLocaleString("en")} of ${filtered.length.toLocaleString("en")} products`
       : "";
     $("#catalog-page-status").textContent = `Page ${catalogPage.toLocaleString("en")} of ${pageCount.toLocaleString("en")}`;
+    $("#catalog-page-first").disabled = catalogPage <= 1;
     $("#catalog-page-previous").disabled = catalogPage <= 1;
     $("#catalog-page-next").disabled = catalogPage >= pageCount;
+    $("#catalog-page-last").disabled = catalogPage >= pageCount;
     $("#catalog-page-controls").hidden = filtered.length === 0;
     const stockFilterDetails = {
       all: {
@@ -668,7 +704,7 @@
   }
 
   function addTablePagination(container, tableScroll, tbody) {
-    if (!tbody || tbody.id === "catalog-products") return;
+    if (!tbody || ["catalog-products", "recent-orders"].includes(tbody.id)) return;
     const controls = document.createElement("nav");
     controls.className = "table-pagination";
     controls.setAttribute("aria-label", "Table pages");
@@ -2376,9 +2412,15 @@
 
   async function invokeUserManagement(body) {
     const { data, error } = await supabaseClient.functions.invoke("manage-users", { body });
-    const explainError = (message) => body.role === "driver" && message === "Choose a valid workspace role."
-      ? "Driver accounts aren't enabled on Supabase yet. Run the updated supabase-schema.sql and deploy the updated manage-users function."
-      : message;
+    const explainError = (message) => {
+      if (message === "Unknown user-management action." && body.action === "create") {
+        return "The deployed user-management function is out of date. Deploy the latest manage-users function, then try again.";
+      }
+      if (body.role === "driver" && message === "Choose a valid workspace role.") {
+        return "Driver accounts aren't enabled on Supabase yet. Run the updated supabase-schema.sql and deploy the updated manage-users function.";
+      }
+      return message;
+    };
     if (error) {
       let message = error.message || "Could not complete user management request.";
       if (error.context instanceof Response) {
@@ -2405,6 +2447,24 @@
           if (typeof responseData.error === "string") message = responseData.error;
         } catch (parseError) {
           console.error("Could not read the workflow error response.", parseError);
+        }
+      }
+      throw new Error(message);
+    }
+    if (data?.error) throw new Error(data.error);
+    return data;
+  }
+
+  async function invokeDriverDelivery(body) {
+    const { data, error } = await supabaseClient.functions.invoke("manage-driver-deliveries", { body });
+    if (error) {
+      let message = error.message || "Could not submit the delivery confirmation.";
+      if (error.context instanceof Response) {
+        try {
+          const responseData = await error.context.clone().json();
+          if (typeof responseData.error === "string") message = responseData.error;
+        } catch (parseError) {
+          console.error("Could not read the delivery confirmation error response.", parseError);
         }
       }
       throw new Error(message);
@@ -2955,6 +3015,17 @@
           approvalRequestedAt: Number(order.approvalRequestedAt) || 0,
           approvalDecidedBy: order.approvalDecidedBy || "",
           approvalDecidedAt: Number(order.approvalDecidedAt) || 0,
+          deliveryConfirmationStatus: ["pending", "approved", "rejected"].includes(order.deliveryConfirmationStatus)
+            ? order.deliveryConfirmationStatus : "",
+          deliveryConfirmationRequestedBy: order.deliveryConfirmationRequestedBy || "",
+          deliveryConfirmationRequestedById: order.deliveryConfirmationRequestedById || "",
+          deliveryConfirmationRequestedAt: Number(order.deliveryConfirmationRequestedAt) || 0,
+          deliveryConfirmationDecidedBy: order.deliveryConfirmationDecidedBy || "",
+          deliveryConfirmationDecidedAt: Number(order.deliveryConfirmationDecidedAt) || 0,
+          deliveredTo: order.deliveredTo || "",
+          deliveredToPhone: order.deliveredToPhone || "",
+          deliveredAt: Number(order.deliveredAt) || 0,
+          takenAt: Number(order.takenAt) || 0,
           deletedAt: Number(order.deletedAt) || 0,
           catalogTakenApplied: Boolean(order.catalogTakenApplied),
           history,
@@ -3187,6 +3258,14 @@
     }).sort((left, right) => (Number(right.createdAt) || 0) - (Number(left.createdAt) || 0));
   }
 
+  function deliveryProgressLabel(order) {
+    if (order.deliveryConfirmationStatus === "pending") return "Awaiting approval";
+    if (normalizeOrderStatus(order.status) === "Delivered") return "Delivered";
+    if (order.deliveryConfirmationStatus === "rejected") return "Rejected — retry";
+    if (normalizeOrderStatus(order.status) === "Cancelled") return "Cancelled";
+    return "Not delivered";
+  }
+
   function sortDriversByOrderCount(driverList, dateRange = null) {
     return driverList
       .map((driver, index) => ({
@@ -3252,6 +3331,9 @@
 
     const selectedDriver = orderedDrivers.find((driver) => driver.phone === selectedShaaficiDriverPhone);
     if (!selectedDriver) {
+      $("#shaafici-driver-take").hidden = true;
+      $("#shaafici-driver-delivery-form").hidden = true;
+      $("#shaafici-delivery-feedback").hidden = true;
       orderDetails.hidden = true;
       orderEmpty.hidden = false;
       orderEmpty.textContent = drivers.length
@@ -3262,6 +3344,13 @@
 
     const driverOrders = getOrdersForDriver(selectedDriver, dateRange);
     if (!driverOrders.length) {
+      $("#shaafici-delivery-counts").textContent = "0 transfers";
+      $("#shaafici-driver-delivery-list").replaceChildren();
+      $("#shaafici-driver-delivery-list-empty").hidden =
+        $("#shaafici-driver-delivery-filter").value === "all";
+      $("#shaafici-driver-take").hidden = true;
+      $("#shaafici-driver-delivery-form").hidden = true;
+      $("#shaafici-delivery-feedback").hidden = true;
       orderDetails.hidden = true;
       orderEmpty.hidden = false;
       orderEmpty.textContent = dateRange
@@ -3270,18 +3359,70 @@
       return;
     }
 
+    const deliveredCount = driverOrders.filter((order) => normalizeOrderStatus(order.status) === "Delivered").length;
+    const awaitingCount = driverOrders.filter((order) => order.deliveryConfirmationStatus === "pending").length;
+    const notDeliveredCount = driverOrders.length - deliveredCount - awaitingCount;
+    $("#shaafici-driver-order-count").textContent =
+      `${driverOrders.length} assigned · ${deliveredCount} delivered · ${awaitingCount} awaiting approval · ${notDeliveredCount} not delivered${dateRange ? " in selected period" : ""}`;
+    const deliveryFilter = $("#shaafici-driver-delivery-filter").value;
+    const visibleOrders = driverOrders.map((order, index) => ({ order, index })).filter(({ order }) => {
+      if (deliveryFilter === "delivered") return normalizeOrderStatus(order.status) === "Delivered";
+      if (deliveryFilter === "awaiting") return order.deliveryConfirmationStatus === "pending";
+      if (deliveryFilter === "not-delivered") {
+        return normalizeOrderStatus(order.status) !== "Delivered" && order.deliveryConfirmationStatus !== "pending";
+      }
+      return true;
+    });
+    if (visibleOrders.length && !visibleOrders.some(({ index }) => index === selectedShaaficiOrderIndex)) {
+      selectedShaaficiOrderIndex = visibleOrders[0].index;
+    }
+    const deliveryList = $("#shaafici-driver-delivery-list");
+    deliveryList.replaceChildren(...visibleOrders.map(({ order: listedOrder, index }) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "driver-delivery-list-item";
+      button.setAttribute("aria-pressed", String(index === selectedShaaficiOrderIndex));
+      const identity = document.createElement("span");
+      identity.className = "driver-delivery-list-identity";
+      const orderId = document.createElement("strong");
+      orderId.textContent = listedOrder.id;
+      const details = document.createElement("small");
+      details.textContent = [listedOrder.transferId, listedOrder.customer].filter(Boolean).join(" · ") || "No transfer details";
+      const status = document.createElement("span");
+      const deliveryStatusClass = listedOrder.deliveryConfirmationStatus === "pending"
+        ? "awaiting"
+        : normalizeOrderStatus(listedOrder.status) === "Delivered"
+          ? "delivered"
+          : listedOrder.deliveryConfirmationStatus === "rejected"
+            ? "rejected"
+            : "not-delivered";
+      status.className = `driver-delivery-list-status driver-delivery-list-status-${deliveryStatusClass}`;
+      status.textContent = deliveryProgressLabel(listedOrder);
+      identity.append(orderId, details);
+      button.append(identity, status);
+      button.addEventListener("click", () => {
+        selectedShaaficiOrderIndex = index;
+        renderShaaficiDrivers();
+      });
+      item.append(button);
+      return item;
+    }));
+    $("#shaafici-delivery-counts").textContent =
+      `${deliveredCount} delivered · ${awaitingCount} awaiting approval · ${notDeliveredCount} not delivered`;
+    $("#shaafici-driver-delivery-list-empty").hidden = visibleOrders.length > 0;
+
     selectedShaaficiOrderIndex = Math.min(selectedShaaficiOrderIndex, driverOrders.length - 1);
     const order = driverOrders[selectedShaaficiOrderIndex];
     orderEmpty.hidden = true;
     orderDetails.hidden = false;
     $("#shaafici-driver-order-title").textContent = `${selectedDriver.name} — ${selectedDriver.phone}`;
-    $("#shaafici-driver-order-count").textContent = `${driverOrders.length} ${driverOrders.length === 1 ? "order" : "orders"} ${dateRange ? "in selected period" : "assigned"}`;
     $("#shaafici-order-number").textContent = order.id || "—";
     $("#shaafici-order-date").textContent = formatDate(order.date);
     $("#shaafici-order-customer").textContent = order.customer || "—";
     $("#shaafici-order-branch").textContent = order.branch || "—";
     $("#shaafici-order-transfer").textContent = order.transferId || "—";
-    $("#shaafici-order-status").textContent = order.status || "—";
+    $("#shaafici-order-status").textContent = deliveryProgressLabel(order);
     $("#shaafici-order-position").textContent = `Order ${selectedShaaficiOrderIndex + 1} of ${driverOrders.length}`;
 
     const items = $("#shaafici-order-items");
@@ -3304,8 +3445,112 @@
 
     $("#shaafici-order-previous").disabled = selectedShaaficiOrderIndex === 0;
     $("#shaafici-order-next").disabled = selectedShaaficiOrderIndex >= driverOrders.length - 1;
+    const deliveryForm = $("#shaafici-driver-delivery-form");
+    const isAssignedDriver = cloudDeployment && cloudRole === "driver";
+    const orderStatus = normalizeOrderStatus(order.status);
+    const canSubmitDelivery = isAssignedDriver && orderStatus === "In progress"
+      && order.deliveryConfirmationStatus !== "pending";
+    $("#shaafici-driver-take").hidden = !isAssignedDriver || orderStatus !== "Pending"
+      || order.approvalStatus === "pending";
+    deliveryForm.hidden = !canSubmitDelivery;
+    $("#shaafici-delivered-to").value = order.deliveredTo || "";
+    $("#shaafici-delivered-to-phone").value = order.deliveredToPhone || "";
+    $("#shaafici-delivery-status").textContent = "";
+    const deliveryFeedback = $("#shaafici-delivery-feedback");
+    deliveryFeedback.textContent = order.deliveryConfirmationStatus === "pending"
+      ? "Delivery submitted; waiting for owner/admin approval."
+      : order.deliveryConfirmationStatus === "rejected"
+        ? "Delivery rejected. Correct the recipient details and resubmit."
+        : order.deliveryConfirmationStatus === "approved"
+          ? `Delivery approved${order.deliveryConfirmationDecidedBy ? ` by ${order.deliveryConfirmationDecidedBy}` : ""}.`
+          : orderStatus === "Pending"
+            ? "Mark this transfer as taken when you start delivering it."
+            : "";
+    deliveryFeedback.hidden = !deliveryFeedback.textContent;
   }
 
+  async function saveShaaficiDriverOrderAction(order, action, details = {}) {
+    const result = await invokeDriverDelivery({ action, orderId: order.id, ...details });
+    if (!result?.order || result.order.id !== order.id) {
+      throw new Error("The transfer update was submitted, but the updated transfer was not returned. Reload to check its status.");
+    }
+    const orderIndex = orders.findIndex((entry) => entry.id === order.id);
+    if (orderIndex < 0) {
+      throw new Error("The transfer update was submitted, but this transfer is no longer in the driver list. Reload to check its status.");
+    }
+    const updatedOrders = [...orders];
+    updatedOrders[orderIndex] = result.order;
+    orders = loadOrders(updatedOrders);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
+    } catch (error) {
+      console.warn("Could not keep a local backup of the driver transfer update.", error);
+    }
+    renderSavedDrivers();
+    renderAllOrders();
+    showToast(action === "take"
+      ? "Transfer marked as taken. Submit delivery for approval when it arrives."
+      : "Delivery submitted. It will be marked delivered after owner/admin approval.");
+  }
+
+  async function submitShaaficiDriverDelivery(event) {
+    event.preventDefault();
+    const status = $("#shaafici-delivery-status");
+    const submit = $("#shaafici-delivery-submit");
+    if (cloudRole !== "driver") {
+      status.textContent = "Only the assigned driver can submit a delivery.";
+      status.classList.add("error");
+      return;
+    }
+    const driver = drivers.find((entry) => entry.phone === cloudDriverKey);
+    const driverOrders = driver && getOrdersForDriver(driver, getDriverDateRange());
+    const order = driverOrders?.[selectedShaaficiOrderIndex];
+    if (!order || normalizeOrderStatus(order.status) !== "In progress"
+      || order.deliveryConfirmationStatus === "pending") {
+      status.textContent = "This transfer cannot be submitted for delivery approval.";
+      status.classList.add("error");
+      return;
+    }
+    if (!$("#shaafici-driver-delivery-form").reportValidity()) return;
+
+    submit.disabled = true;
+    status.classList.remove("error");
+    status.textContent = "Submitting delivery for approval…";
+    try {
+      await saveShaaficiDriverOrderAction(order, "deliver", {
+        deliveredTo: $("#shaafici-delivered-to").value.trim(),
+        deliveredToPhone: $("#shaafici-delivered-to-phone").value.trim()
+      });
+    } catch (error) {
+      console.error("Could not submit the driver delivery confirmation.", error);
+      status.textContent = error.message || "Could not submit the delivery confirmation.";
+      status.classList.add("error");
+    } finally {
+      submit.disabled = false;
+    }
+  }
+
+  async function markShaaficiDriverOrderTaken() {
+    const status = $("#shaafici-delivery-feedback");
+    const button = $("#shaafici-driver-take");
+    const driver = drivers.find((entry) => entry.phone === cloudDriverKey);
+    const order = driver && getOrdersForDriver(driver, getDriverDateRange())[selectedShaaficiOrderIndex];
+    if (cloudRole !== "driver" || !order) {
+      status.textContent = "Only the assigned driver can update this transfer.";
+      status.hidden = false;
+      return;
+    }
+    button.disabled = true;
+    try {
+      await saveShaaficiDriverOrderAction(order, "take");
+    } catch (error) {
+      console.error("Could not mark the driver transfer as taken.", error);
+      status.textContent = error.message || "Could not update this transfer.";
+      status.hidden = false;
+    } finally {
+      button.disabled = false;
+    }
+  }
   function renderSavedDrivers() {
     $("#drivers-status").textContent = drivers.length
       ? `${drivers.length} ${drivers.length === 1 ? "driver" : "drivers"} saved`
@@ -5224,6 +5469,18 @@
       approvalRequestedBy: previousOrder?.approvalRequestedBy || "",
       approvalRequestedById: previousOrder?.approvalRequestedById || "",
       approvalRequestedAt: previousOrder?.approvalRequestedAt || 0,
+      approvalDecidedBy: previousOrder?.approvalDecidedBy || "",
+      approvalDecidedAt: previousOrder?.approvalDecidedAt || 0,
+      deliveryConfirmationStatus: previousOrder?.deliveryConfirmationStatus || "",
+      deliveryConfirmationRequestedBy: previousOrder?.deliveryConfirmationRequestedBy || "",
+      deliveryConfirmationRequestedById: previousOrder?.deliveryConfirmationRequestedById || "",
+      deliveryConfirmationRequestedAt: previousOrder?.deliveryConfirmationRequestedAt || 0,
+      deliveryConfirmationDecidedBy: previousOrder?.deliveryConfirmationDecidedBy || "",
+      deliveryConfirmationDecidedAt: previousOrder?.deliveryConfirmationDecidedAt || 0,
+      deliveredTo: previousOrder?.deliveredTo || "",
+      deliveredToPhone: previousOrder?.deliveredToPhone || "",
+      deliveredAt: previousOrder?.deliveredAt || 0,
+      takenAt: previousOrder?.takenAt || 0,
       items: getItems(),
       createdAt: editingId ? previousOrder?.createdAt || Date.now() : Date.now()
     };
@@ -5268,6 +5525,13 @@
   function orderRow(order) {
     const status = normalizeOrderStatus(order.status);
     const overdue = isOrderOverdue(order);
+    const approvalNotice = order.approvalStatus === "pending"
+      ? "Awaiting order approval"
+      : order.deliveryConfirmationStatus === "pending"
+        ? "Delivery awaiting approval"
+        : order.deliveryConfirmationStatus === "rejected"
+          ? "Delivery rejected — driver may resubmit"
+          : "";
     const row = document.createElement("tr");
     row.className = "clickable-order-row";
     if (overdue) row.classList.add("order-overdue-row");
@@ -5278,7 +5542,7 @@
       <td class="customer-cell">${escapeAttribute(order.customer)}${overdue ? '<small class="overdue-label">OVERDUE</small>' : ""}</td>
       <td>${escapeAttribute(order.transferId || "—")}</td>
       <td>${formatDate(order.date)}</td>
-      <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button>${order.approvalStatus === "pending" ? '<small class="approval-state">Awaiting approval</small>' : ""}</td>
+      <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button>${approvalNotice ? `<small class="approval-state">${escapeAttribute(approvalNotice)}</small>` : ""}</td>
       <td class="row-actions"><button class="icon-button" type="button" aria-label="Open order ${escapeAttribute(order.id)}" title="Open order">↗</button><button class="order-action-button" type="button" data-action="history" aria-label="View history for ${escapeAttribute(order.id)}">History</button><button class="order-action-button order-delete-button" type="button" data-action="delete" aria-label="Delete order ${escapeAttribute(order.id)}">Delete</button></td>`;
     row.addEventListener("click", (event) => {
       if (event.target.closest("button, a, input, select, textarea")) return;
@@ -5329,18 +5593,17 @@
     });
   }
 
-  function overviewDateRange(period) {
-    const now = new Date();
-    const today = dateValue(now);
-    let start = today;
+  function overviewDateRange(period, selectedDate) {
+    const date = new Date(`${selectedDate}T00:00:00`);
+    let start = selectedDate;
     if (period === "week") {
-      start = dateValue(new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7)));
+      start = dateValue(new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7)));
     } else if (period === "month") {
-      start = dateValue(new Date(now.getFullYear(), now.getMonth(), 1));
+      start = dateValue(new Date(date.getFullYear(), date.getMonth(), 1));
     } else if (period === "year") {
-      start = dateValue(new Date(now.getFullYear(), 0, 1));
+      start = dateValue(new Date(date.getFullYear(), 0, 1));
     }
-    return { start, end: today };
+    return { start, end: selectedDate };
   }
 
   function renderOverviewChart(target, empty, values, unit) {
@@ -5379,7 +5642,10 @@
 
   function renderOverviewAnalytics(activeOrders) {
     const period = $("#overview-period").value;
-    const range = overviewDateRange(period);
+    const dateInput = $("#overview-date");
+    if (!dateInput.value) dateInput.value = dateValue();
+    const selectedDate = dateInput.value;
+    const range = overviewDateRange(period, selectedDate);
     const matchingOrders = activeOrders.filter((order) =>
       normalizeOrderStatus(order.status) !== "Cancelled"
       && typeof order.date === "string"
@@ -5397,7 +5663,7 @@
       const branch = String(order.branch || "").trim() || "Unassigned";
       branchOrders.set(branch, (branchOrders.get(branch) || 0) + 1);
     });
-    const periodLabels = { day: "Today", week: "This week", month: "This month", year: "This year" };
+    const periodLabels = { day: "Day", week: "Week to date", month: "Month to date", year: "Year to date" };
     $("#overview-analytics-period").textContent = `${periodLabels[period]} · ${formatDate(range.start)}–${formatDate(range.end)}`;
     renderOverviewChart($("#overview-product-sales"), $("#overview-products-empty"), productOrders, "orders");
     renderOverviewChart($("#overview-branch-activity"), $("#overview-branches-empty"), branchOrders, "orders");
@@ -5437,6 +5703,14 @@
           summary: `${order.id} · ${order.customer}`,
           requester: order.approvalRequestedBy || "Unknown user",
           timestamp: Number(order.approvalRequestedAt) || Number(order.createdAt) || 0
+        })),
+      ...orders.filter((order) => !order.deletedAt && order.deliveryConfirmationStatus === "pending")
+        .map((order) => ({
+          type: "Delivery confirmation",
+          id: order.id,
+          summary: `${order.id} · ${order.transferId || "No transfer ID"} · ${order.customer}`,
+          requester: order.deliveryConfirmationRequestedBy || order.driver || "Driver",
+          timestamp: Number(order.deliveryConfirmationRequestedAt) || Number(order.createdAt) || 0
         })),
       ...catalogApprovals.filter((request) => request.status === "pending")
         .map((request) => ({
@@ -5484,7 +5758,9 @@
     try {
       const body = request.type === "Order"
         ? { action: "decide-order", orderId: request.id, decision }
-        : { action: "decide-adjustment", requestId: request.id, decision };
+        : request.type === "Delivery confirmation"
+          ? { action: "decide-delivery", orderId: request.id, decision }
+          : { action: "decide-adjustment", requestId: request.id, decision };
       await invokeWorkflowManagement(body);
       await loadCloudData(false);
       renderProductCatalogOptions();
@@ -6275,6 +6551,7 @@
       ["Created by", "preparedBy"],
       ["Notes", "notes"],
       ["Approval request", "approvalStatus"],
+      ["Delivery confirmation", "deliveryConfirmationStatus"],
       ["Items", "items"]
     ];
     return fields.filter(([, key]) => JSON.stringify(previous[key] ?? "") !== JSON.stringify(next[key] ?? ""))
@@ -6316,6 +6593,10 @@
     const index = orders.findIndex((entry) => entry.id === order.id && !entry.deletedAt);
     const previousOrders = orders;
     const previousOrder = index >= 0 ? orders[index] : null;
+    if (previousOrder?.deliveryConfirmationStatus === "pending") {
+      showToast("This transfer has a delivery awaiting approval. Decide the request before editing it.");
+      return;
+    }
     const previousCatalog = productCatalog.map((item) => ({
       ...item,
       quantities: [...(item.quantities || [])],
@@ -6400,6 +6681,10 @@
     if (!order || order.deletedAt) return;
     if (order.approvalStatus === "pending") {
       showToast("This order is waiting for admin approval before its status can change.");
+      return;
+    }
+    if (order.deliveryConfirmationStatus === "pending") {
+      showToast("This delivery is waiting for admin approval before its status can change.");
       return;
     }
     const statuses = ["Pending", "In progress", "Delivered", "Cancelled"];
@@ -6580,6 +6865,9 @@
   $("#overview-period").addEventListener("change", () => {
     renderOverviewAnalytics(orders.filter((order) => !order.deletedAt));
   });
+  $("#overview-date").addEventListener("change", () => {
+    renderOverviewAnalytics(orders.filter((order) => !order.deletedAt));
+  });
   $$("[data-view]").forEach((link) => link.addEventListener("click", (event) => {
     event.preventDefault();
     setView(link.dataset.view);
@@ -6706,7 +6994,10 @@
   });
   $("#shaafici-driver-period").addEventListener("change", renderShaaficiDrivers);
   $("#shaafici-driver-date").addEventListener("change", renderShaaficiDrivers);
+  $("#shaafici-driver-delivery-filter").addEventListener("change", renderShaaficiDrivers);
   $("#shaafici-driver-search").addEventListener("input", renderShaaficiDrivers);
+  $("#shaafici-driver-delivery-form").addEventListener("submit", submitShaaficiDriverDelivery);
+  $("#shaafici-driver-take").addEventListener("click", markShaaficiDriverOrderTaken);
   $("#order-driver").addEventListener("focus", () => renderDriverSuggestions($("#order-driver").value));
   $("#order-driver").addEventListener("click", () => renderDriverSuggestions($("#order-driver").value));
   $("#order-driver").addEventListener("input", () => {
@@ -6940,12 +7231,20 @@
   ["status-filter", "order-date-from-filter", "order-date-to-filter"]
     .forEach((id) => $(`#${id}`).addEventListener("change", renderAllOrders));
   $("#catalog-search").addEventListener("input", scheduleCatalogSearchRender);
+  $("#catalog-page-first").addEventListener("click", () => {
+    catalogPage = 1;
+    renderProductCatalogTable({ preservePage: true });
+  });
   $("#catalog-page-previous").addEventListener("click", () => {
     catalogPage -= 1;
     renderProductCatalogTable({ preservePage: true });
   });
   $("#catalog-page-next").addEventListener("click", () => {
     catalogPage += 1;
+    renderProductCatalogTable({ preservePage: true });
+  });
+  $("#catalog-page-last").addEventListener("click", () => {
+    catalogPage = Math.max(1, Math.ceil(getFilteredCatalogRows().length / CATALOG_PAGE_SIZE));
     renderProductCatalogTable({ preservePage: true });
   });
   $("#scheduled-report-form").addEventListener("submit", saveScheduledReport);

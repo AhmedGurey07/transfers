@@ -14,7 +14,7 @@ The GitHub Pages site is static, so it needs a hosted database. This setup uses 
 
 ## 2. Deploy the Edge Functions
 
-The browser cannot safely create or edit Auth users directly. The `manage-users` Edge Function performs those operations using Supabase's server-side service role key, and checks the caller's role on every request. It can create a **Driver** account linked to a saved driver.
+The browser cannot safely create or edit Auth users directly. The `manage-users` Edge Function performs those operations using Supabase's server-side service role key, and checks the caller's role on every request. It can create a **Driver** account linked to a saved driver. A linked driver can mark an assigned transfer as taken and submit a delivery confirmation with the recipient's name and phone number. The transfer remains **In progress** until an owner/admin approves the confirmation; rejection returns it to **In progress** so the driver can correct the details and resubmit.
 
 From the project folder, use the Supabase CLI:
 
@@ -29,9 +29,9 @@ supabase functions deploy manage-driver-deliveries
 
 Supabase provides `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` to Edge Functions. Do not copy the service-role key into `supabase-config.js`, GitHub, or the browser.
 
-All four Edge Functions check workspace roles server-side and use the service-role key only in Supabase. `manage-backups` accepts restore requests from workspace owners/admins and merges records without replacing existing orders, drivers, returns, or matching products. `manage-workflows` lists assignable workspace users for signed-in staff and handles admin-only order/stock approval decisions. `manage-driver-deliveries` rejects driver write requests because Driver accounts are view-only.
+All four Edge Functions check workspace roles server-side and use the service-role key only in Supabase. `manage-backups` accepts restore requests from workspace owners/admins and merges records without replacing existing orders, drivers, returns, or matching products. `manage-workflows` lists assignable workspace users for signed-in staff and handles admin-only order, stock, and delivery approval decisions. `manage-driver-deliveries` lets a linked driver update only their assigned transfer's delivery progress.
 
-Only the workspace owner can create, edit, or assign Driver accounts. Each Driver account must be linked to a saved driver's phone number. After sign-in, a Driver can open only **Drivers → SHAAFICI Drivers**, and the database limits results to orders assigned to that linked phone number. Drivers cannot create or change orders, read other drivers, or access the catalog, returns, or user list. For an existing Supabase project, rerun the complete `supabase-schema.sql` before deploying these functions; it updates the role constraint and row-level security policies.
+Only the workspace owner can create, edit, or assign Driver accounts. Each Driver account must be linked to a saved driver's phone number. After sign-in, a Driver can open only **Drivers → SHAAFICI Drivers**, and the database limits results to orders assigned to that linked phone number. Drivers can only update their assigned transfer's delivery progress through the `manage-driver-deliveries` Edge Function; only owners/admins can approve or reject delivery confirmations from **All orders → Approval requests**. Drivers cannot otherwise create or edit orders, read other drivers, or access the catalog, returns, or user list. The driver and admin/owner views show each assigned transfer's delivery state. For an existing Supabase project, rerun the complete `supabase-schema.sql` before deploying these functions; it updates the role constraint, row-level security policies, and approval protections.
 
 The schema also creates the public `profile-photos` Storage bucket. Signed-in users can upload or replace photos only inside their own user-ID folder. Profile photos are publicly readable; do not upload private images.
 

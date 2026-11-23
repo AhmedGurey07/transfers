@@ -9,8 +9,8 @@
   "theme_color": "#f5f6f2",
   "icons": [
     {
-      "src": "shaafici-app-icon.png",
-      "sizes": "256x256",
+      "src": "shaafici-app-icon.png?v=202611232259",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     }

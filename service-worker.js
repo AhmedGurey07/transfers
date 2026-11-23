@@ -1,18 +1,20 @@
-const CACHE_NAME = "shaafici-order-desk-v81";
+const CACHE_NAME = "shaafici-order-desk-v87";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=202611230047",
+  "./styles.css?v=202611232334",
   "./supabase-config.js",
   "./products.js",
   "./vendor/pdfjs/pdf.min.js",
   "./vendor/pdfjs/pdf.worker.min.js",
   "./vendor/html2canvas/html2canvas.min.js",
-  "./app.js?v=202611230047",
-  "./manifest.webmanifest",
+  "./app.js?v=202611232334",
+  "./manifest.webmanifest?v=202611232334",
   "./shaafici-warehouse-200-logo.png",
   "./shaafici-warehouse-200-logo-dark.png",
-  "./shaafici-app-icon.png"
+  "./shaafici-wordmark-light.png",
+  "./shaafici-wordmark-dark.png",
+  "./shaafici-app-icon.png?v=202611232259"
 ];
 
 self.addEventListener("install", (event) => {

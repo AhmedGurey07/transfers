@@ -6,6 +6,11 @@
   const OFFLINE_CACHE_DB = "shaafici-order-desk-offline-v2";
   const OFFLINE_CACHE_STORE = "workspace";
   const OFFLINE_CACHE_KEY = "shaafici-order-desk-offline-info-v2";
+  let appUpdater = null;
+  let appUpdateManifest = null;
+  let appUpdateCheckPromise = null;
+  let onlineModeInitialized = false;
+  let appUpdateEventsInitialized = false;
   const WORKSPACE_LOCATIONS = [
     { id: "warehouse-200", name: "Warehouse 200", type: "warehouse" },
     { id: "warehouse-150", name: "Warehouse 150", type: "warehouse" },
@@ -63,20 +68,15 @@
     "Converter"
   ];
   function normalizeCreatedBy(value) {
-    const name = String(value || "").trim().toLowerCase();
-    if (name === "ahmed gurey" || name === "eng ahmed gurey") return "Eng Ahmed Gurey";
-    if (name === "hamze ali") return "Hamze Ali";
-    return "";
+    const name = String(value || "").trim();
+    if (!name) return "";
+    const normalized = name.toLocaleLowerCase();
+    if (normalized === "ahmed gurey" || normalized === "eng ahmed gurey") return "Eng Ahmed Gurey";
+    if (normalized === "hamze ali") return "Hamze Ali";
+    return name;
   }
   function createdByForUser(user) {
-    const displayName = normalizeCreatedBy(user?.user_metadata?.display_name);
-    if (displayName) return displayName;
-    const identity = `${user?.email || ""} ${user?.user_metadata?.username || ""}`
-      .toLocaleLowerCase()
-      .replace(/[^a-z0-9]/g, "");
-    if (identity.includes("hamzeali")) return "Hamze Ali";
-    if (identity.includes("engahmedgurey") || identity.includes("ahmedgurey")) return "Eng Ahmed Gurey";
-    return "Eng Ahmed Gurey";
+    return normalizeCreatedBy(usernameForUser(user)) || "Workspace user";
   }
   function usernameForUser(user) {
     const metadataName = String(user?.user_metadata?.display_name || user?.user_metadata?.username || "").trim();
@@ -200,6 +200,8 @@
   let preferredOfflineUserId = "";
   let currentPreparedBy = "Eng Ahmed Gurey";
   let workspaceUsers = [];
+  let createdByUsers = [];
+  let createdByUsersLocationId = "";
   let cloudChannel = null;
   let cloudActivationPromise = null;
   let cloudRefreshTimer = null;
@@ -2924,8 +2926,12 @@
     if (offlineReadOnly) throw new Error("Offline access is read-only. Reconnect and reload before making changes.");
     const { data, error } = await supabaseClient.functions.invoke("manage-users", { body });
     const explainError = (message) => {
-      if (message === "Unknown user-management action." && body.action === "create") {
+      if (message === "Unknown user-management action."
+        && ["create", "list-branch-users"].includes(body.action)) {
         return "The deployed user-management function is out of date. Deploy the latest manage-users function, then try again.";
+      }
+      if (body.action === "list-branch-users" && message === "Only the workspace owner can manage users.") {
+        return "Branch user lists are not enabled on Supabase yet. Deploy the updated manage-users function, then try again.";
       }
       if (body.role === "driver" && message === "Choose a valid workspace role.") {
         return "Driver accounts aren't enabled on Supabase yet. Run the updated supabase-schema.sql and deploy the updated manage-users function.";
@@ -3235,6 +3241,80 @@
     }
   }
 
+  function renderCreatedByOptions(selectedName = currentPreparedBy) {
+    const select = $("#order-created-by");
+    const names = [currentPreparedBy];
+    if (createdByUsersLocationId === activeLocationId) {
+      names.push(...createdByUsers.map((user) => user.name));
+    }
+
+    const seen = new Set();
+    const options = names
+      .map(normalizeCreatedBy)
+      .filter((name) => {
+        const key = name.toLocaleLowerCase();
+        if (!name || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((name) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        return option;
+      });
+
+    select.replaceChildren(...options);
+    const requestedName = normalizeCreatedBy(selectedName);
+    select.value = options.some((option) => option.value === requestedName)
+      ? requestedName
+      : currentPreparedBy;
+  }
+
+  async function loadCreatedByUsers() {
+    currentPreparedBy = createdByForUser(cloudUser);
+    const status = $("#created-by-status");
+    const select = $("#order-created-by");
+    if (!cloudDeployment || !cloudUser) {
+      createdByUsers = [];
+      createdByUsersLocationId = "";
+      renderCreatedByOptions();
+      status.textContent = "";
+      return;
+    }
+    if (offlineReadOnly) {
+      createdByUsers = [];
+      createdByUsersLocationId = "";
+      renderCreatedByOptions();
+      status.textContent = "Offline mode: only your signed-in name is available.";
+      return;
+    }
+
+    const locationId = activeLocationId;
+    select.disabled = true;
+    status.textContent = `Loading registered users for ${locationName(locationId)}…`;
+    try {
+      const result = await invokeUserManagement({ action: "list-branch-users", locationId });
+      if (!Array.isArray(result.users)
+        || result.users.some((user) => typeof user?.name !== "string" || !user.name.trim())) {
+        throw new Error("The branch user list returned invalid data.");
+      }
+      createdByUsers = result.users;
+      createdByUsersLocationId = locationId;
+      status.textContent = createdByUsers.length
+        ? `Names registered to ${locationName(locationId)}.`
+        : `No other active users are registered to ${locationName(locationId)}.`;
+    } catch (error) {
+      console.error(`Could not load registered users for ${locationName(locationId)}.`, error);
+      createdByUsers = [];
+      createdByUsersLocationId = "";
+      status.textContent = `Could not load branch users: ${error.message}`;
+    } finally {
+      renderCreatedByOptions(select.value || currentPreparedBy);
+      select.disabled = false;
+    }
+  }
+
   function editWorkspaceUser(user) {
     if (cloudRole !== "owner") {
       setUsersStatus("Only the workspace owner can manage users.", true);
@@ -3494,7 +3574,10 @@
       cloudUser = user;
       workspaceUsers = [];
       currentPreparedBy = createdByForUser(user);
+      createdByUsers = [];
+      createdByUsersLocationId = "";
       form.elements.preparedBy.value = currentPreparedBy;
+      renderCreatedByOptions();
       setAuthStatus("Loading your online orders…");
       try {
         const roleResult = await supabaseClient.from("workspace_user_roles")
@@ -3530,6 +3613,8 @@
           await loadCloudData(true);
           await applyYesterdayOrderTransfers();
         }
+        if (cloudRole === "driver") renderCreatedByOptions(currentPreparedBy);
+        else await loadCreatedByUsers();
         if (cloudRole === "owner") await loadWorkspaceUsers();
         $("#auth-gate").hidden = true;
         $("#app-shell").hidden = false;
@@ -3574,6 +3659,8 @@
     void clearOfflineSnapshot();
     resetForm();
     cloudUser = null;
+    createdByUsers = [];
+    createdByUsersLocationId = "";
     cloudRole = "staff";
     cloudDriverKey = "";
     setView("overview");
@@ -3586,7 +3673,139 @@
     showAuthGate("Sign in to load your shared online workspace.");
   }
 
+  function isNativeAndroidApp() {
+    return window.Capacitor?.getPlatform?.() === "android";
+  }
+
+  function appUpdateStatus(message, isError = false) {
+    const status = $("#app-update-status");
+    status.textContent = message;
+    status.classList.toggle("error", isError);
+  }
+
+  function nativeAppUpdater() {
+    if (appUpdater) return appUpdater;
+    if (typeof window.Capacitor?.registerPlugin !== "function") {
+      throw new Error("The app update service is unavailable. Reinstall the latest app and try again.");
+    }
+    appUpdater = window.Capacitor.registerPlugin("AppUpdater");
+    return appUpdater;
+  }
+
+  async function checkRequiredAppUpdate() {
+    if (!isNativeAndroidApp()) {
+      $("#app-update-gate").hidden = true;
+      return true;
+    }
+
+    const gate = $("#app-update-gate");
+    const button = $("#app-update-button");
+    gate.hidden = false;
+    $("#auth-gate").hidden = true;
+    $("#app-shell").hidden = true;
+    $("#app-update-title").textContent = "Checking for updates";
+    $("#app-update-copy").textContent = "The latest app version is required before sign-in.";
+    button.disabled = true;
+    button.textContent = "Checking for updates…";
+    appUpdateStatus("Checking the installed version and update server.");
+
+    try {
+      const update = await nativeAppUpdater().checkForUpdates();
+      const installedVersionCode = Number(update?.installedVersionCode);
+      const latestVersionCode = Number(update?.latestVersionCode);
+      if (!Number.isSafeInteger(installedVersionCode) || installedVersionCode < 1
+        || !Number.isSafeInteger(latestVersionCode) || latestVersionCode < 1
+        || typeof update?.latestVersionName !== "string"
+        || typeof update?.apkUrl !== "string"
+        || typeof update?.sha256 !== "string") {
+        throw new Error("The update server returned invalid version information.");
+      }
+
+      if (latestVersionCode > installedVersionCode) {
+        appUpdateManifest = update;
+        $("#app-update-title").textContent = "Update required";
+        $("#app-update-copy").textContent =
+          `Version ${update.latestVersionName} must be installed before you can sign in.`;
+        button.textContent = `Update to version ${update.latestVersionName}`;
+        button.disabled = false;
+        appUpdateStatus("Tap Update, then approve the installation in Android.");
+        return false;
+      }
+
+      appUpdateManifest = null;
+      gate.hidden = true;
+      return true;
+    } catch (error) {
+      console.error("Could not verify the required app update.", error);
+      appUpdateManifest = null;
+      $("#app-update-title").textContent = "Unable to verify app version";
+      $("#app-update-copy").textContent = "Connect to the internet and check again to continue.";
+      button.textContent = "Retry update check";
+      button.disabled = false;
+      appUpdateStatus(error.message || "Could not contact the update server.", true);
+      return false;
+    }
+  }
+
+  async function updateAppFromGate() {
+    const button = $("#app-update-button");
+    if (!appUpdateManifest) {
+      button.disabled = true;
+      await checkAppUpdateOnce();
+      return;
+    }
+
+    button.disabled = true;
+    appUpdateStatus("Downloading and verifying the latest app package.");
+    try {
+      const result = await nativeAppUpdater().installUpdate({
+        apkUrl: appUpdateManifest.apkUrl,
+        sha256: appUpdateManifest.sha256,
+        versionCode: appUpdateManifest.latestVersionCode
+      });
+      if (result?.permissionRequired) {
+        button.disabled = false;
+        button.textContent = "Continue update";
+        appUpdateStatus("Allow installs from SHAAFICI Order Desk in Android settings, then tap Continue update.");
+        return;
+      }
+      button.textContent = "Waiting for Android installer";
+      appUpdateStatus("Approve the update in Android's installer. This app will check the version again when you return.");
+    } catch (error) {
+      console.error("Could not install the app update.", error);
+      button.disabled = false;
+      button.textContent = `Update to version ${appUpdateManifest.latestVersionName}`;
+      appUpdateStatus(error.message || "Could not download the app update.", true);
+    }
+  }
+
+  function initializeAppUpdateEvents() {
+    if (appUpdateEventsInitialized) return;
+    appUpdateEventsInitialized = true;
+    $("#app-update-button").addEventListener("click", updateAppFromGate);
+    const recheckAfterInstaller = () => {
+      if (isNativeAndroidApp() && !onlineModeInitialized && !document.hidden) {
+        void initializeOnlineMode();
+      }
+    };
+    window.addEventListener("focus", recheckAfterInstaller);
+    document.addEventListener("visibilitychange", recheckAfterInstaller);
+  }
+
+  function checkAppUpdateOnce() {
+    if (!appUpdateCheckPromise) {
+      appUpdateCheckPromise = checkRequiredAppUpdate()
+        .finally(() => { appUpdateCheckPromise = null; });
+    }
+    return appUpdateCheckPromise;
+  }
+
   async function initializeOnlineMode() {
+    if (onlineModeInitialized) return;
+    initializeAppUpdateEvents();
+    if (!(await checkAppUpdateOnce())) return;
+    if (onlineModeInitialized) return;
+    onlineModeInitialized = true;
     const config = window.ORDER_DESK_SUPABASE || {};
     const validConfig = typeof config.url === "string" && config.url.startsWith("https://")
       && typeof config.anonKey === "string" && config.anonKey.length > 20;
@@ -5087,7 +5306,7 @@
       form.elements.date.value = imported.date;
       form.elements.driver.value = imported.driver;
       form.elements.driverPhone.value = imported.driverPhone || "";
-      if (imported.preparedBy) form.elements.preparedBy.value = normalizeCreatedBy(imported.preparedBy);
+      renderCreatedByOptions(imported.preparedBy || currentPreparedBy);
       form.elements.notes.value = imported.notes || "";
       form.elements.category.value = categories[7];
       itemsBody.replaceChildren();
@@ -7539,7 +7758,7 @@
     form.elements.date.value = order.date;
     form.elements.driver.value = order.driver || "";
     form.elements.driverPhone.value = order.driverPhone || "";
-    form.elements.preparedBy.value = normalizeCreatedBy(order.preparedBy);
+    renderCreatedByOptions(order.preparedBy || currentPreparedBy);
     form.elements.notes.value = order.notes || "";
     $("#order-priority").checked = Boolean(order.priority);
     itemsBody.replaceChildren();
@@ -8330,6 +8549,10 @@
     switcher.hidden = !canSwitchLocation;
     locationLabel.hidden = !cloudDeployment || canSwitchLocation;
     locationLabel.textContent = cloudDeployment ? locationName(activeLocationId) : "";
+    const branchName = locationName(activeLocationId);
+    $("#sidebar-brand-location").textContent = branchName;
+    $("#preview-brand-location").textContent = branchName;
+    $("#paper-brand-location").textContent = branchName;
     if (canSwitchLocation) {
       select.replaceChildren(...WORKSPACE_LOCATIONS.map((location) => {
         const option = document.createElement("option");
@@ -8360,6 +8583,7 @@
     try {
       await loadCloudData(false, { render: false, saveSnapshot: false });
       await applyYesterdayOrderTransfers();
+      await loadCreatedByUsers();
       renderWorkspaceLocation();
       renderLoadedWorkspaceData();
       setSyncStatus(`Online · showing ${locationName(activeLocationId)} data.`);
@@ -8371,6 +8595,7 @@
       $("#workspace-location-select").value = activeLocationId;
       try {
         await loadCloudData(false, { render: false, saveSnapshot: false });
+        await loadCreatedByUsers();
         renderWorkspaceLocation();
         renderLoadedWorkspaceData();
         void saveOfflineSnapshot();
@@ -8533,11 +8758,12 @@
       .catch((error) => console.warn("Could not enable offline app caching.", error));
   }
 
-  if (cloudDeployment) {
+  if (cloudDeployment || isNativeAndroidApp()) {
     initializeOnlineMode();
   } else {
     orders = loadOrders();
     drivers = loadDrivers();
+    renderCreatedByOptions();
     applyYesterdayOrderTransfers().finally(renderLoadedApp);
   }
 })();

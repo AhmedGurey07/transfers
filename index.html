@@ -4,20 +4,30 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f5f6f2">
-  <link rel="manifest" href="manifest.webmanifest?v=20261109">
-  <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
+  <link rel="manifest" href="manifest.webmanifest?v=202611232334">
+  <link rel="icon" type="image/png" sizes="512x512" href="shaafici-app-icon.png?v=202611232259">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=202611230047">
+  <link rel="stylesheet" href="styles.css?v=202611232334">
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="vendor/html2canvas/html2canvas.min.js" defer></script>
-  <script src="app.js?v=202611230047" defer></script>
+  <script src="app.js?v=202611232334" defer></script>
 </head>
 <body>
+  <section class="auth-gate" id="app-update-gate" aria-labelledby="app-update-title" hidden>
+    <div class="auth-card">
+      <img class="theme-aware-logo" src="shaafici-wordmark-light.png" data-light-src="shaafici-wordmark-light.png" data-dark-src="shaafici-wordmark-dark.png" alt="SHAAFICI">
+      <p class="eyebrow">APP UPDATE</p>
+      <h1 id="app-update-title">Checking for updates</h1>
+      <p class="auth-copy" id="app-update-copy">The latest app version is required before sign-in.</p>
+      <button class="button button-primary auth-submit" id="app-update-button" type="button" disabled>Checking for updates…</button>
+      <p class="auth-status" id="app-update-status" role="status" aria-live="polite"></p>
+    </div>
+  </section>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
     <form class="auth-card" id="auth-form">
-      <img class="theme-aware-logo" src="shaafici-warehouse-200-logo.png" data-light-src="shaafici-warehouse-200-logo.png" data-dark-src="shaafici-warehouse-200-logo-dark.png" alt="SHAAFICI Warehouse 200">
+      <img class="theme-aware-logo" src="shaafici-wordmark-light.png" data-light-src="shaafici-wordmark-light.png" data-dark-src="shaafici-wordmark-dark.png" alt="SHAAFICI">
       <p class="eyebrow">SHAAFICI · ORDER DESK</p>
       <h1 id="auth-title">Sign in to your workspace</h1>
       <p class="auth-copy">Your orders and saved drivers are stored securely online.</p>
@@ -34,7 +44,7 @@
       <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
     </form>
     <form class="auth-card" id="invite-signup-form" hidden>
-      <img class="theme-aware-logo" src="shaafici-warehouse-200-logo.png" data-light-src="shaafici-warehouse-200-logo.png" data-dark-src="shaafici-warehouse-200-logo-dark.png" alt="SHAAFICI Warehouse 200">
+      <img class="theme-aware-logo" src="shaafici-wordmark-light.png" data-light-src="shaafici-wordmark-light.png" data-dark-src="shaafici-wordmark-dark.png" alt="SHAAFICI">
       <p class="eyebrow">INVITED WORKSPACE MEMBER</p>
       <h1 id="invite-signup-title">Complete your signup</h1>
       <p class="auth-copy">Set your username and password. You can also add a profile photo.</p>
@@ -61,7 +71,10 @@
     <button class="mobile-nav-backdrop" id="mobile-nav-backdrop" type="button" aria-label="Close navigation" hidden></button>
     <aside class="sidebar" id="app-sidebar">
       <a class="brand" href="#" aria-label="SHAAFICI Order Desk home">
-        <img class="brand-logo theme-aware-logo" src="shaafici-warehouse-200-logo.png" data-light-src="shaafici-warehouse-200-logo.png" data-dark-src="shaafici-warehouse-200-logo-dark.png" alt="SHAAFICI Warehouse 200">
+        <span class="brand-lockup">
+          <img class="brand-logo theme-aware-logo" src="shaafici-wordmark-light.png" data-light-src="shaafici-wordmark-light.png" data-dark-src="shaafici-wordmark-dark.png" alt="SHAAFICI">
+          <span class="brand-location-label sidebar-brand-location" id="sidebar-brand-location"></span>
+        </span>
       </a>
 
       <div class="nav-label">WORKSPACE</div>
@@ -406,7 +419,7 @@
                     </div>
                     <div class="drivers-manager-actions"><button class="button button-secondary" type="button" id="save-driver">Save driver</button><span id="drivers-status" role="status" aria-live="polite"></span></div>
                   </details>
-                  <label class="field"><span>Created by</span><select name="preparedBy"><option value="Eng Ahmed Gurey">Eng Ahmed Gurey</option><option value="Hamze Ali">Hamze Ali</option></select></label>
+                  <label class="field"><span>Created by</span><select name="preparedBy" id="order-created-by"></select><small id="created-by-status" role="status" aria-live="polite"></small></label>
                   <label class="field field-wide"><span>Notes</span><textarea name="notes" rows="2" maxlength="250" placeholder="Add delivery instructions or other details"></textarea></label>
                   <label class="field field-wide order-priority-field"><span><input id="order-priority" type="checkbox"> Priority transfer</span><small>Priority transfers appear first and are highlighted in the driver's queue.</small></label>
                 </div>
@@ -454,7 +467,7 @@
               <article class="preview-card">
                 <div class="preview-top"><div><span class="preview-label">LIVE PREVIEW</span><h2>Order form</h2></div></div>
                 <div class="preview-divider"></div>
-                <div class="preview-business"><img class="preview-logo" src="shaafici-warehouse-200-logo.png" alt="SHAAFICI Warehouse 200"></div>
+                <div class="preview-business"><div class="document-brand-lockup"><img class="preview-logo" src="shaafici-wordmark-light.png" alt="SHAAFICI"><strong class="brand-location-label" id="preview-brand-location"></strong></div></div>
                 <div class="preview-order-meta"><div><span>ORDER NO.</span><strong id="preview-id">AG-NEW</strong></div><div><span>DATE</span><strong id="preview-date">—</strong></div></div>
                 <div class="preview-customer"><span>CUSTOMER</span><strong id="preview-customer">Customer name</strong><small id="preview-transfer-id">Transfer ID: —</small></div>
                 <div class="preview-contact"><div><span>BRANCH</span><strong id="preview-branch">—</strong></div><div><span>DELIVERED BY</span><strong id="preview-driver">—</strong><small id="preview-driver-phone"></small></div></div>
@@ -597,7 +610,7 @@
         <article class="print-sheet">
           <button class="button button-secondary receipt-screenshot-button" type="button" id="take-receipt-screenshot">Take a screenshot</button>
           <header class="print-sheet-header">
-            <div class="print-sheet-brand"><img class="print-sheet-logo" src="shaafici-warehouse-200-logo.png" alt="SHAAFICI Warehouse 200"></div>
+            <div class="print-sheet-brand"><div class="document-brand-lockup"><img class="print-sheet-logo" src="shaafici-wordmark-light.png" alt="SHAAFICI"><strong class="brand-location-label" id="paper-brand-location"></strong></div></div>
             <div class="print-sheet-title"><span>ORDER FORM</span><strong id="paper-order-id">AG-NEW</strong></div>
           </header>
           <div class="print-sheet-rule"></div>

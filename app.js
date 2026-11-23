@@ -8391,6 +8391,7 @@
     renderWorkspaceLocation();
     renderUnassignedOrders();
     const isDriver = cloudDeployment && cloudRole === "driver";
+    const canManageUsers = cloudDeployment && cloudRole === "owner";
     $("#app-shell").hidden = false;
     $("#app-shell").classList.toggle("offline-read-only", offlineReadOnly);
     $("#offline-read-only-banner").hidden = !offlineReadOnly;
@@ -8399,8 +8400,9 @@
     $$("[data-view]").forEach((link) => {
       link.hidden = isDriver
         ? link.dataset.view !== "drivers"
-        : link.dataset.view === "users" && (!cloudDeployment || cloudRole !== "owner");
+        : link.dataset.view === "users" && !canManageUsers;
     });
+    $("#users-view").hidden = !canManageUsers;
     $("#add-catalog-product").hidden = cloudDeployment && !["owner", "admin"].includes(cloudRole);
     $("#upload-workbook").hidden = cloudDeployment && !["owner", "admin"].includes(cloudRole);
     $("#approvals-panel").hidden = !cloudDeployment || isDriver;

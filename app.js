@@ -3365,13 +3365,23 @@
     $("#shaafici-driver-order-count").textContent =
       `${driverOrders.length} assigned · ${deliveredCount} delivered · ${awaitingCount} awaiting approval · ${notDeliveredCount} not delivered${dateRange ? " in selected period" : ""}`;
     const deliveryFilter = $("#shaafici-driver-delivery-filter").value;
+    const deliverySearchQuery = $("#shaafici-driver-delivery-search").value.trim().toLocaleLowerCase();
     const visibleOrders = driverOrders.map((order, index) => ({ order, index })).filter(({ order }) => {
-      if (deliveryFilter === "delivered") return normalizeOrderStatus(order.status) === "Delivered";
-      if (deliveryFilter === "awaiting") return order.deliveryConfirmationStatus === "pending";
-      if (deliveryFilter === "not-delivered") {
-        return normalizeOrderStatus(order.status) !== "Delivered" && order.deliveryConfirmationStatus !== "pending";
-      }
-      return true;
+      const matchesStatus = deliveryFilter === "delivered"
+        ? normalizeOrderStatus(order.status) === "Delivered"
+        : deliveryFilter === "awaiting"
+          ? order.deliveryConfirmationStatus === "pending"
+          : deliveryFilter === "not-delivered"
+            ? normalizeOrderStatus(order.status) !== "Delivered" && order.deliveryConfirmationStatus !== "pending"
+            : true;
+      if (!matchesStatus) return false;
+      const searchableText = [
+        order.id,
+        order.transferId,
+        order.customer,
+        order.deliveredTo
+      ].map((value) => String(value || "")).join(" ").toLocaleLowerCase();
+      return !deliverySearchQuery || searchableText.includes(deliverySearchQuery);
     });
     if (visibleOrders.length && !visibleOrders.some(({ index }) => index === selectedShaaficiOrderIndex)) {
       selectedShaaficiOrderIndex = visibleOrders[0].index;
@@ -3411,6 +3421,10 @@
     $("#shaafici-delivery-counts").textContent =
       `${deliveredCount} delivered · ${awaitingCount} awaiting approval · ${notDeliveredCount} not delivered`;
     $("#shaafici-driver-delivery-list-empty").hidden = visibleOrders.length > 0;
+    $("#shaafici-driver-delivery-list-empty").textContent = deliverySearchQuery
+      ? "No transfers match your search and selected status."
+      : "No transfers match this status.";
+    $("#shaafici-driver-selected-order").hidden = visibleOrders.length === 0;
 
     selectedShaaficiOrderIndex = Math.min(selectedShaaficiOrderIndex, driverOrders.length - 1);
     const order = driverOrders[selectedShaaficiOrderIndex];
@@ -3467,6 +3481,11 @@
             ? "Mark this transfer as taken when you start delivering it."
             : "";
     deliveryFeedback.hidden = !deliveryFeedback.textContent;
+    const recipientValue = [order.deliveredTo, order.deliveredToPhone].filter(Boolean).join(" · ");
+    const canViewRecipient = isAssignedDriver || ["owner", "admin"].includes(cloudRole);
+    $("#shaafici-delivery-recipient-value").textContent = recipientValue;
+    $("#shaafici-delivery-recipient").hidden =
+      !canViewRecipient || !order.deliveryConfirmationStatus || !recipientValue;
   }
 
   async function saveShaaficiDriverOrderAction(order, action, details = {}) {
@@ -5525,6 +5544,10 @@
   function orderRow(order) {
     const status = normalizeOrderStatus(order.status);
     const overdue = isOrderOverdue(order);
+    const deliveryRecipientNotice = ["owner", "admin"].includes(cloudRole)
+      && ["pending", "approved", "rejected"].includes(order.deliveryConfirmationStatus)
+      ? `<small class="delivery-recipient-detail">Recipient: ${escapeAttribute(order.deliveredTo || "—")} · ${escapeAttribute(order.deliveredToPhone || "—")}</small>`
+      : "";
     const approvalNotice = order.approvalStatus === "pending"
       ? "Awaiting order approval"
       : order.deliveryConfirmationStatus === "pending"
@@ -5542,7 +5565,7 @@
       <td class="customer-cell">${escapeAttribute(order.customer)}${overdue ? '<small class="overdue-label">OVERDUE</small>' : ""}</td>
       <td>${escapeAttribute(order.transferId || "—")}</td>
       <td>${formatDate(order.date)}</td>
-      <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button>${approvalNotice ? `<small class="approval-state">${escapeAttribute(approvalNotice)}</small>` : ""}</td>
+      <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button>${approvalNotice ? `<small class="approval-state">${escapeAttribute(approvalNotice)}</small>` : ""}${deliveryRecipientNotice}</td>
       <td class="row-actions"><button class="icon-button" type="button" aria-label="Open order ${escapeAttribute(order.id)}" title="Open order">↗</button><button class="order-action-button" type="button" data-action="history" aria-label="View history for ${escapeAttribute(order.id)}">History</button><button class="order-action-button order-delete-button" type="button" data-action="delete" aria-label="Delete order ${escapeAttribute(order.id)}">Delete</button></td>`;
     row.addEventListener("click", (event) => {
       if (event.target.closest("button, a, input, select, textarea")) return;
@@ -6995,6 +7018,7 @@
   $("#shaafici-driver-period").addEventListener("change", renderShaaficiDrivers);
   $("#shaafici-driver-date").addEventListener("change", renderShaaficiDrivers);
   $("#shaafici-driver-delivery-filter").addEventListener("change", renderShaaficiDrivers);
+  $("#shaafici-driver-delivery-search").addEventListener("input", renderShaaficiDrivers);
   $("#shaafici-driver-search").addEventListener("input", renderShaaficiDrivers);
   $("#shaafici-driver-delivery-form").addEventListener("submit", submitShaaficiDriverDelivery);
   $("#shaafici-driver-take").addEventListener("click", markShaaficiDriverOrderTaken);

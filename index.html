@@ -7,12 +7,12 @@
   <link rel="manifest" href="manifest.webmanifest?v=20261109">
   <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=202611230003">
+  <link rel="stylesheet" href="styles.css?v=202611230006">
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="vendor/html2canvas/html2canvas.min.js" defer></script>
-  <script src="app.js?v=202611230006" defer></script>
+  <script src="app.js?v=202611230009" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -485,38 +485,44 @@
               <div class="empty-state" id="shaafici-driver-order-empty">Choose a driver to see their orders.</div>
               <div id="shaafici-driver-order-details" hidden>
                 <div class="panel-heading"><div><h2 id="shaafici-driver-order-title">Driver orders</h2><p id="shaafici-driver-order-count"></p></div></div>
-                <div class="driver-order-summary">
-                  <div><span>ORDER</span><strong id="shaafici-order-number">—</strong></div>
-                  <div><span>DATE</span><strong id="shaafici-order-date">—</strong></div>
-                  <div><span>CUSTOMER</span><strong id="shaafici-order-customer">—</strong></div>
-                  <div><span>BRANCH</span><strong id="shaafici-order-branch">—</strong></div>
-                  <div><span>TRANSFER ID</span><strong id="shaafici-order-transfer">—</strong></div>
-                  <div><span>STATUS</span><strong id="shaafici-order-status">—</strong></div>
-                </div>
-                <h3 class="driver-order-items-title">Order items</h3>
-                <ol class="driver-order-items" id="shaafici-order-items"></ol>
-                <p class="driver-delivery-feedback" id="shaafici-delivery-feedback" role="status" aria-live="polite" hidden></p>
-                <button class="button button-secondary driver-take-button" id="shaafici-driver-take" type="button" hidden>Mark transfer as taken</button>
-                <form class="driver-delivery-form" id="shaafici-driver-delivery-form" hidden>
-                  <p>Enter who received this transfer. It will be marked delivered after an owner or admin approves it.</p>
-                  <div class="driver-delivery-fields">
-                    <label class="field">Recipient name
-                      <input class="item-input" id="shaafici-delivered-to" type="text" maxlength="160" autocomplete="name" required>
-                    </label>
-                    <label class="field">Recipient phone
-                      <input class="item-input" id="shaafici-delivered-to-phone" type="tel" maxlength="30" autocomplete="tel" required>
-                    </label>
+                <div id="shaafici-driver-selected-order">
+                  <div class="driver-order-summary">
+                    <div><span>ORDER</span><strong id="shaafici-order-number">—</strong></div>
+                    <div><span>DATE</span><strong id="shaafici-order-date">—</strong></div>
+                    <div><span>CUSTOMER</span><strong id="shaafici-order-customer">—</strong></div>
+                    <div><span>BRANCH</span><strong id="shaafici-order-branch">—</strong></div>
+                    <div><span>TRANSFER ID</span><strong id="shaafici-order-transfer">—</strong></div>
+                    <div><span>STATUS</span><strong id="shaafici-order-status">—</strong></div>
                   </div>
-                  <div class="driver-delivery-actions">
-                    <button class="button button-primary" id="shaafici-delivery-submit" type="submit">Submit delivery for approval</button>
-                    <span id="shaafici-delivery-status" role="status" aria-live="polite"></span>
+                  <h3 class="driver-order-items-title">Order items</h3>
+                  <ol class="driver-order-items" id="shaafici-order-items"></ol>
+                  <p class="driver-delivery-feedback" id="shaafici-delivery-feedback" role="status" aria-live="polite" hidden></p>
+                  <div class="driver-delivery-recipient" id="shaafici-delivery-recipient" role="group" aria-label="Delivery recipient" hidden>
+                    <strong>DELIVERY RECIPIENT</strong>
+                    <span id="shaafici-delivery-recipient-value"></span>
                   </div>
-                </form>
-                <div class="driver-order-navigation">
-                  <button class="button button-secondary" id="shaafici-order-previous" type="button">← Previous order</button>
-                  <span id="shaafici-order-position" aria-live="polite"></span>
-                  <button class="button button-secondary" id="shaafici-order-next" type="button">Next order →</button>
-                </div>
+                  <button class="button button-secondary driver-take-button" id="shaafici-driver-take" type="button" hidden>Mark transfer as taken</button>
+                  <form class="driver-delivery-form" id="shaafici-driver-delivery-form" hidden>
+                    <p>Enter who received this transfer. It will be marked delivered after an owner or admin approves it.</p>
+                    <div class="driver-delivery-fields">
+                      <label class="field">Recipient name
+                        <input class="item-input" id="shaafici-delivered-to" type="text" maxlength="160" autocomplete="name" required>
+                      </label>
+                      <label class="field">Recipient phone
+                        <input class="item-input" id="shaafici-delivered-to-phone" type="tel" maxlength="30" autocomplete="tel" required>
+                      </label>
+                    </div>
+                    <div class="driver-delivery-actions">
+                      <button class="button button-primary" id="shaafici-delivery-submit" type="submit">Submit delivery for approval</button>
+                      <span id="shaafici-delivery-status" role="status" aria-live="polite"></span>
+                    </div>
+                  </form>
+                  <div class="driver-order-navigation">
+                    <button class="button button-secondary" id="shaafici-order-previous" type="button">← Previous order</button>
+                    <span id="shaafici-order-position" aria-live="polite"></span>
+                    <button class="button button-secondary" id="shaafici-order-next" type="button">Next order →</button>
+                  </div>
+                  </div>
                 <section class="driver-delivery-tracker" aria-labelledby="driver-delivery-tracker-title">
                   <div class="driver-delivery-tracker-heading">
                     <div><h3 id="driver-delivery-tracker-title">Delivery progress</h3><p id="shaafici-delivery-counts"></p></div>
@@ -527,6 +533,10 @@
                       <option value="delivered">Delivered</option>
                     </select></label>
                   </div>
+                  <label class="search-box driver-delivery-search">
+                    <span aria-hidden="true">⌕</span>
+                    <input id="shaafici-driver-delivery-search" type="search" aria-label="Search transfers by customer or recipient name" placeholder="Search by name or transfer ID" autocomplete="off">
+                  </label>
                   <ol class="driver-delivery-list" id="shaafici-driver-delivery-list"></ol>
                   <p class="driver-delivery-list-empty" id="shaafici-driver-delivery-list-empty" hidden>No transfers match this status.</p>
                 </section>

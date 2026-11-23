@@ -1945,12 +1945,12 @@
       driverKey: cloudDriverKey,
       orders,
       drivers,
-      unassignedOrders: ["owner", "admin"].includes(cloudRole) ? unassignedOrders : [],
+      unassignedOrders: cloudRole === "owner" ? unassignedOrders : [],
       catalog: cloudRole === "driver" ? null : currentCatalogData(),
       returnedTiles: cloudRole === "driver" ? [] : returnedTiles,
       returnedTilesSetupError,
       catalogApprovals: cloudRole === "driver" ? [] : catalogApprovals,
-      workspaceUsers: ["owner", "admin"].includes(cloudRole) ? workspaceUsers : []
+      workspaceUsers: cloudRole === "owner" ? workspaceUsers : []
     };
     let database;
     try {
@@ -2714,9 +2714,9 @@
   }
 
   async function loadCloudData(importLocalData, { render = true, saveSnapshot = true } = {}) {
-    const isAdmin = ["owner", "admin"].includes(cloudRole);
+    const isOwner = cloudRole === "owner";
     let orderQuery = supabaseClient.from("orders").select("id,data,location_id").order("id");
-    orderQuery = isAdmin
+    orderQuery = isOwner
       ? orderQuery.or(`location_id.eq.${activeLocationId},location_id.is.null`)
       : orderQuery.eq("location_id", activeLocationId);
     const driverQuery = supabaseClient.from("drivers")
@@ -2726,7 +2726,7 @@
       .select("id,data,location_id")
       .eq("location_id", activeLocationId)
       .order("id");
-    const onlineOrderIdsQuery = importLocalData && isAdmin
+    const onlineOrderIdsQuery = importLocalData && isOwner
       ? supabaseClient.from("orders").select("id")
       : Promise.resolve({ data: null, error: null });
     const [orderResult, driverResult, catalogResult, returnResult, onlineOrderIdsResult] = await Promise.all([
@@ -2777,7 +2777,7 @@
       applySyncedSourceData(catalogResult.data.data);
     } else clearCatalogForLocation();
 
-    unassignedOrders = isAdmin
+    unassignedOrders = isOwner
       ? orderResult.data.filter((row) => !WORKSPACE_LOCATION_NAMES.has(row.location_id || ""))
         .map((row) => ({ ...row.data, id: row.id, locationId: "" }))
       : [];
@@ -2786,7 +2786,7 @@
       .map((row) => ({ ...row.data, id: row.id, locationId: row.location_id }));
     if (importLocalData) {
       const localOrders = loadOrders();
-      if (isAdmin && activeLocationId === DEFAULT_LOCATION_ID) {
+      if (isOwner && activeLocationId === DEFAULT_LOCATION_ID) {
         const legacyOrders = loadOrders(localStorage.getItem(STORAGE_KEY) || "[]");
         const knownIds = new Set(localOrders.map((order) => order.id));
         localOrders.push(...legacyOrders.filter((order) => !knownIds.has(order.id)));
@@ -2802,7 +2802,7 @@
       );
       const missingOrders = scopedLocalOrders.filter((order) =>
         !onlineOrderIds.has(order.id)
-        && (isAdmin || order.locationId === activeLocationId)
+        && (isOwner || order.locationId === activeLocationId)
       );
       if (missingOrders.length) {
         const { error } = await supabaseClient.from("orders").upsert(
@@ -2828,7 +2828,7 @@
     if (importLocalData) {
       const knownDrivers = new Set(driverData.map((driver) => driverPhoneDigits(driver.phone)));
       const localDrivers = loadDrivers();
-      if (isAdmin && activeLocationId === DEFAULT_LOCATION_ID) {
+      if (isOwner && activeLocationId === DEFAULT_LOCATION_ID) {
         const knownPhones = new Set(localDrivers.map((driver) => driver.phone.trim()));
         localDrivers.push(...loadDrivers(localStorage.getItem(DRIVERS_STORAGE_KEY) || "[]")
           .filter((driver) => !knownPhones.has(driver.phone.trim())));
@@ -3030,7 +3030,7 @@
     const panel = $("#unassigned-orders-panel");
     const body = $("#unassigned-orders");
     if (!panel || !body) return;
-    const canReview = cloudDeployment && ["owner", "admin"].includes(cloudRole);
+    const canReview = cloudDeployment && cloudRole === "owner";
     panel.hidden = !canReview;
     body.replaceChildren();
     $("#unassigned-orders-empty").hidden = !canReview || unassignedOrders.length > 0;
@@ -3131,7 +3131,7 @@
 
   function updateManagedUserLocationField() {
     const role = $("#managed-user-role").value;
-    const requiresLocation = role === "staff" || role === "driver";
+    const requiresLocation = ["admin", "staff", "driver"].includes(role);
     $("#managed-user-location-field").hidden = !requiresLocation;
     $("#managed-user-location").required = requiresLocation;
   }
@@ -3156,7 +3156,7 @@
     renderManagedUserDriverOptions();
     $("#managed-user-driver-field").hidden = true;
     $("#managed-user-driver").required = false;
-    $("#user-role-help").textContent = "Choose a branch for staff and driver accounts; they can access only that branch. Admin and owner accounts can access all locations.";
+    $("#user-role-help").textContent = "Admin, staff, and driver accounts are assigned to one branch. Branch admins can manage branch data but not users; the owner can access all branches and manage users.";
     setUsersStatus("");
   }
 
@@ -3170,7 +3170,7 @@
         user.name || "—",
         user.email || "—",
         user.role.charAt(0).toUpperCase() + user.role.slice(1),
-        ["owner", "admin"].includes(user.role)
+        user.role === "owner"
           ? "All locations"
           : user.locationName || locationName(user.locationId),
         user.driverName || user.driverKey || "—",
@@ -3213,8 +3213,8 @@
       setUsersStatus("Showing the last cached user list. Reconnect and reload to refresh it.");
       return;
     }
-    if (!["owner", "admin"].includes(cloudRole)) {
-      setUsersStatus("Only workspace admins can manage users.", true);
+    if (cloudRole !== "owner") {
+      setUsersStatus("Only the workspace owner can manage users.", true);
       return;
     }
     $("#users-refresh").disabled = true;
@@ -3236,8 +3236,8 @@
   }
 
   function editWorkspaceUser(user) {
-    if (cloudRole !== "owner" && user.role !== "staff") {
-      setUsersStatus("Admins can only edit staff accounts.", true);
+    if (cloudRole !== "owner") {
+      setUsersStatus("Only the workspace owner can manage users.", true);
       return;
     }
     $("#managed-user-id").value = user.id;
@@ -3254,7 +3254,11 @@
     $("#managed-user-driver").required = user.role === "driver";
     $("#user-role-help").textContent = user.role === "driver"
       ? "This account is limited to the assigned branch and can view only the linked driver's orders."
-      : "Choose a branch for staff accounts; they can access only that branch. Admin and owner accounts can access all locations.";
+      : user.role === "admin"
+        ? "This admin can manage data only in the assigned branch. Only the owner can manage users."
+        : user.role === "owner"
+          ? "The owner can access all branches and manage users."
+          : "This staff account can access only the assigned branch.";
     $("#managed-user-password-fields").hidden = true;
     $("#managed-user-password").required = false;
     $("#managed-user-password-confirm").required = false;
@@ -3286,8 +3290,8 @@
       setUsersStatus("Offline access is read-only. Reconnect and reload before making changes.", true);
       return;
     }
-    if (!["owner", "admin"].includes(cloudRole)) {
-      setUsersStatus("Only workspace admins can manage users.", true);
+    if (cloudRole !== "owner") {
+      setUsersStatus("Only the workspace owner can manage users.", true);
       return;
     }
     const submit = $("#save-managed-user");
@@ -3296,7 +3300,7 @@
     const passwordConfirmation = $("#managed-user-password-confirm").value;
     const role = cloudRole === "owner" ? $("#managed-user-role").value : "staff";
     const driverKey = role === "driver" ? $("#managed-user-driver").value : "";
-    const locationId = ["staff", "driver"].includes(role) ? $("#managed-user-location").value : "";
+    const locationId = ["admin", "staff", "driver"].includes(role) ? $("#managed-user-location").value : "";
     const payload = {
       name: $("#managed-user-name").value.trim(),
       email: $("#managed-user-email").value.trim(),
@@ -3304,7 +3308,7 @@
       driverKey,
       locationId
     };
-    if (["staff", "driver"].includes(role) && !WORKSPACE_LOCATION_NAMES.has(locationId)) {
+    if (["admin", "staff", "driver"].includes(role) && !WORKSPACE_LOCATION_NAMES.has(locationId)) {
       setUsersStatus("Choose a location for this user.", true);
       return;
     }
@@ -3503,16 +3507,16 @@
           }
           throw new Error(`Could not load your workspace role: ${roleResult.error.message}`);
         }
-        if (!roleResult.data?.role) throw new Error("Your workspace account has no assigned role. Ask an owner or admin to configure it.");
+        if (!roleResult.data?.role) throw new Error("Your workspace account has no assigned role. Ask the workspace owner to configure it.");
         cloudRole = roleResult.data.role;
         cloudDriverKey = cloudRole === "driver" ? roleResult.data.driver_key || "" : "";
         cloudLocationId = roleResult.data.location_id || "";
-        if (["staff", "driver"].includes(cloudRole)) {
+        if (["admin", "staff", "driver"].includes(cloudRole)) {
           if (!WORKSPACE_LOCATION_NAMES.has(cloudLocationId)) {
-            throw new Error("Your account has no valid assigned location. Ask an owner or admin to assign one.");
+            throw new Error("Your account has no valid assigned location. Ask the workspace owner to assign one.");
           }
           activeLocationId = cloudLocationId;
-        } else if (["owner", "admin"].includes(cloudRole)) {
+        } else if (cloudRole === "owner") {
           if (!WORKSPACE_LOCATION_NAMES.has(activeLocationId)) activeLocationId = DEFAULT_LOCATION_ID;
         } else {
           throw new Error("Your workspace account has an unsupported role.");
@@ -3526,7 +3530,7 @@
           await loadCloudData(true);
           await applyYesterdayOrderTransfers();
         }
-        if (["owner", "admin"].includes(cloudRole)) await loadWorkspaceUsers();
+        if (cloudRole === "owner") await loadWorkspaceUsers();
         $("#auth-gate").hidden = true;
         $("#app-shell").hidden = false;
         $("#storage-description").textContent = `Signed in as ${user.email || "workspace member"}.`;
@@ -5117,8 +5121,8 @@
     if (name !== "new-order" && $("#new-order-view").classList.contains("active")
       && confirmUnsaved && !confirmDiscardUnsavedOrder()) return false;
     closeMobileNavigation();
-    if (name === "users" && !["owner", "admin"].includes(cloudRole)) {
-      showToast("Only workspace admins can manage users.");
+    if (name === "users" && cloudRole !== "owner") {
+      showToast("Only the workspace owner can manage users.");
       name = "overview";
     }
     if (name === "profile" && (!cloudDeployment || !cloudUser)) name = "overview";
@@ -5142,7 +5146,7 @@
       if (!$("#shaafici-driver-panel").hidden) renderShaaficiDrivers();
     }
     if (name === "overview") renderOverview();
-    if (name === "users" && ["owner", "admin"].includes(cloudRole)) loadWorkspaceUsers();
+    if (name === "users" && cloudRole === "owner") loadWorkspaceUsers();
     if (name === "profile") prepareProfileForm();
     window.scrollTo({ top: 0, behavior: "smooth" });
     return true;
@@ -8318,7 +8322,7 @@
   });
 
   function renderWorkspaceLocation() {
-    const canSwitchLocation = cloudDeployment && ["owner", "admin"].includes(cloudRole)
+    const canSwitchLocation = cloudDeployment && cloudRole === "owner"
       && !offlineReadOnly;
     const switcher = $("#workspace-location-switcher");
     const locationLabel = $("#workspace-location-name");
@@ -8341,7 +8345,7 @@
   }
 
   async function switchWorkspaceLocation(locationId) {
-    if (!["owner", "admin"].includes(cloudRole)
+    if (cloudRole !== "owner"
       || !WORKSPACE_LOCATION_NAMES.has(locationId)
       || locationId === activeLocationId) return;
     if (hasUnsavedOrderChanges() && !confirmDiscardUnsavedOrder()) {
@@ -8395,7 +8399,7 @@
     $$("[data-view]").forEach((link) => {
       link.hidden = isDriver
         ? link.dataset.view !== "drivers"
-        : link.dataset.view === "users" && (!cloudDeployment || !["owner", "admin"].includes(cloudRole));
+        : link.dataset.view === "users" && (!cloudDeployment || cloudRole !== "owner");
     });
     $("#add-catalog-product").hidden = cloudDeployment && !["owner", "admin"].includes(cloudRole);
     $("#upload-workbook").hidden = cloudDeployment && !["owner", "admin"].includes(cloudRole);

@@ -101,7 +101,12 @@ where role <> 'driver'
 
 update public.workspace_user_roles
 set location_id = null
-where role in ('owner', 'admin');
+where role = 'owner';
+
+update public.workspace_user_roles
+set location_id = 'warehouse-200'
+where role = 'admin'
+  and location_id is null;
 
 update public.workspace_user_roles
 set location_id = 'warehouse-200'
@@ -114,8 +119,8 @@ alter table public.workspace_user_roles
 alter table public.workspace_user_roles
   add constraint workspace_user_roles_location_check
   check (
-    (role in ('staff', 'driver') and location_id is not null)
-    or (role in ('owner', 'admin') and location_id is null)
+    (role = 'owner' and location_id is null)
+    or (role in ('admin', 'staff', 'driver') and location_id is not null)
   );
 
 with ranked_drivers as (
@@ -242,8 +247,8 @@ security definer
 set search_path = public, pg_temp
 as $$
   select case
-    when public.current_workspace_role() in ('owner', 'admin') then true
-    when public.current_workspace_role() in ('staff', 'driver')
+  when public.current_workspace_role() = 'owner' then true
+  when public.current_workspace_role() in ('admin', 'staff', 'driver')
       then public.current_workspace_location_id() is not null
         and public.current_workspace_location_id() = target_location_id
     else false
@@ -267,16 +272,16 @@ create policy "Workspace staff can manage orders"
   for all
   to authenticated
   using (
-    public.current_workspace_role() in ('owner', 'admin')
+    public.current_workspace_role() = 'owner'
     or (
-      public.current_workspace_role() = 'staff'
+      public.current_workspace_role() in ('admin', 'staff')
       and public.can_access_workspace_location(location_id)
     )
   )
   with check (
-    public.current_workspace_role() in ('owner', 'admin')
+    public.current_workspace_role() = 'owner'
     or (
-      public.current_workspace_role() = 'staff'
+      public.current_workspace_role() in ('admin', 'staff')
       and public.can_access_workspace_location(location_id)
     )
   );
@@ -360,16 +365,16 @@ create policy "Workspace staff can manage returned tiles"
   for all
   to authenticated
   using (
-    public.current_workspace_role() in ('owner', 'admin')
+    public.current_workspace_role() = 'owner'
     or (
-      public.current_workspace_role() = 'staff'
+      public.current_workspace_role() in ('admin', 'staff')
       and public.can_access_workspace_location(location_id)
     )
   )
   with check (
-    public.current_workspace_role() in ('owner', 'admin')
+    public.current_workspace_role() = 'owner'
     or (
-      public.current_workspace_role() = 'staff'
+      public.current_workspace_role() in ('admin', 'staff')
       and public.can_access_workspace_location(location_id)
     )
   );
@@ -381,16 +386,16 @@ create policy "Workspace staff can manage the catalog"
   for all
   to authenticated
   using (
-    public.current_workspace_role() in ('owner', 'admin')
+    public.current_workspace_role() = 'owner'
     or (
-      public.current_workspace_role() = 'staff'
+      public.current_workspace_role() in ('admin', 'staff')
       and public.can_access_workspace_location(location_id)
     )
   )
   with check (
-    public.current_workspace_role() in ('owner', 'admin')
+    public.current_workspace_role() = 'owner'
     or (
-      public.current_workspace_role() = 'staff'
+      public.current_workspace_role() in ('admin', 'staff')
       and public.can_access_workspace_location(location_id)
     )
   );

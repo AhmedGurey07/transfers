@@ -7,12 +7,12 @@
   <link rel="manifest" href="manifest.webmanifest?v=20261109">
   <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=202611230045">
+  <link rel="stylesheet" href="styles.css?v=202611230046">
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="vendor/html2canvas/html2canvas.min.js" defer></script>
-  <script src="app.js?v=202611230045" defer></script>
+  <script src="app.js?v=202611230046" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -308,7 +308,7 @@
       </section>
 
       <section class="view" id="users-view" aria-labelledby="users-title">
-        <div class="page-heading"><div><p class="eyebrow">WORKSPACE ACCESS</p><h1 id="users-title">Users</h1><p class="welcome-copy">Assign staff and drivers to one location; owner and admin accounts can access all locations.</p></div><button class="button button-secondary" type="button" id="users-refresh">Refresh users</button></div>
+        <div class="page-heading"><div><p class="eyebrow">WORKSPACE ACCESS</p><h1 id="users-title">Users</h1><p class="welcome-copy">Assign branch admins, staff, and drivers to a location. Only the owner can access every branch and manage users.</p></div><button class="button button-secondary" type="button" id="users-refresh">Refresh users</button></div>
         <div class="builder-layout users-layout">
           <section class="panel" aria-labelledby="user-form-title">
             <div class="panel-heading"><div><h2 id="user-form-title">Create a user</h2><p id="user-form-help">Set an initial password, then share it with the user securely.</p></div></div>
@@ -333,7 +333,7 @@
                 <select class="item-input" id="managed-user-role">
                   <option value="staff">Staff</option>
                   <option value="driver">Driver — assigned orders only</option>
-                  <option value="admin">Admin</option>
+                  <option value="admin">Admin — assigned branch</option>
                   <option value="owner">Owner</option>
                 </select>
               </label>
@@ -345,7 +345,7 @@
                   <option value="">Choose a saved driver</option>
                 </select>
               </label>
-              <p class="auth-copy" id="user-role-help">Choose a branch for staff and driver accounts; they can access only that branch. Admin and owner accounts can access all locations.</p>
+              <p class="auth-copy" id="user-role-help">Admin, staff, and driver accounts are assigned to one branch. Branch admins can manage branch data but not users; the owner can access all branches and manage users.</p>
               <div class="form-actions"><div><button class="button button-primary" id="save-managed-user" type="submit">Create user</button><button class="button button-quiet" id="cancel-user-edit" type="button" hidden>Cancel</button></div></div>
               <p class="auth-status" id="users-status" role="status" aria-live="polite"></p>
             </form>

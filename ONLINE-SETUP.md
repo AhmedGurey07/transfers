@@ -66,7 +66,7 @@ Returned tiles are saved in the separate `returned_tile_records` Supabase table 
 
 ## Order, stock, reports, and backup features
 
-The Overview and All orders pages use **Pending**, **In progress**, **Delivered**, and **Cancelled** statuses. Existing **Open** orders are shown as Pending and existing **Completed** orders as Delivered. Click a status pill in either order table to cycle through the four statuses.
+The Overview and All orders pages use **Pending**, **In progress**, **Delivered**, and **Cancelled** statuses. Existing **Open** orders are shown as Pending and existing **Completed** orders as Delivered. Status pills cycle through all four statuses as usual. The driver's **Not delivered** queue is based on delivery-confirmation approval, not the order status: manually marking an order Delivered does not remove it. It remains there, including while a request awaits review, until the driver submits delivery details and an owner/admin approves the request. The driver can still submit a request for an assigned transfer whose order status was manually set to Delivered.
 
 Overview count cards are clickable: order cards open the matching order list (including overdue orders), while **Total items**, **Low stock**, **Ended products**, and **Critical condition** open the matching catalog products.
 

@@ -1857,13 +1857,14 @@
   function updateOfflineAccessButton() {
     const button = $("#offline-open");
     const note = $("#offline-cache-note");
-    if (!button || !note) return;
+    const label = $("#offline-open-label-full");
+    if (!button || !note || !label) return;
     const info = readOfflineCacheInfo();
     const available = Boolean(info && (!preferredOfflineUserId || info.userId === preferredOfflineUserId));
     button.hidden = !available;
     note.hidden = !available;
     if (available) {
-      button.textContent = `Open cached workspace for ${info.email} (read-only)`;
+      label.textContent = `Open cached workspace for ${info.email} (read-only)`;
     }
   }
 
@@ -3517,9 +3518,13 @@
     );
   }
 
+  function isDriverDeliveryApproved(order) {
+    return order.deliveryConfirmationStatus === "approved";
+  }
+
   function deliveryProgressLabel(order) {
+    if (isDriverDeliveryApproved(order)) return "Delivered";
     if (order.deliveryConfirmationStatus === "pending") return "Awaiting approval";
-    if (normalizeOrderStatus(order.status) === "Delivered") return "Delivered";
     if (order.deliveryConfirmationStatus === "rejected") return "Rejected — retry";
     if (normalizeOrderStatus(order.status) === "Cancelled") return "Cancelled";
     return "Not delivered";
@@ -3576,6 +3581,10 @@
     const optionsEmpty = $("#shaafici-driver-options-empty");
     const orderEmpty = $("#shaafici-driver-order-empty");
     const orderDetails = $("#shaafici-driver-order-details");
+    const deliveryFilter = $("#shaafici-driver-delivery-filter").value;
+    $$(".driver-delivery-summary [data-driver-delivery-filter]").forEach((card) => {
+      card.setAttribute("aria-pressed", String(card.dataset.driverDeliveryFilter === deliveryFilter));
+    });
     const query = $("#shaafici-driver-search").value.trim().toLocaleLowerCase();
     const dateRange = getDriverDateRange();
     const orderedDrivers = sortDriversByOrderCount(drivers.filter((driver) =>
@@ -3658,21 +3667,20 @@
       return;
     }
 
-    const deliveredCount = driverOrders.filter((order) => normalizeOrderStatus(order.status) === "Delivered").length;
+    const deliveredCount = driverOrders.filter(isDriverDeliveryApproved).length;
     const awaitingCount = driverOrders.filter((order) => order.deliveryConfirmationStatus === "pending").length;
-    const notDeliveredCount = driverOrders.length - deliveredCount - awaitingCount;
+    const notDeliveredCount = driverOrders.length - deliveredCount;
     updateDriverDeliverySummary(driverOrders.length, deliveredCount, awaitingCount, notDeliveredCount);
     $("#shaafici-driver-order-count").textContent =
       `${driverOrders.length} assigned · ${deliveredCount} delivered · ${awaitingCount} awaiting approval · ${notDeliveredCount} not delivered${dateRange ? " in selected period" : ""}`;
-    const deliveryFilter = $("#shaafici-driver-delivery-filter").value;
     const deliverySearchQuery = $("#shaafici-driver-delivery-search").value.trim().toLocaleLowerCase();
     const visibleOrders = driverOrders.map((order, index) => ({ order, index })).filter(({ order }) => {
       const matchesStatus = deliveryFilter === "delivered"
-        ? normalizeOrderStatus(order.status) === "Delivered"
+        ? isDriverDeliveryApproved(order)
         : deliveryFilter === "awaiting"
           ? order.deliveryConfirmationStatus === "pending"
           : deliveryFilter === "not-delivered"
-            ? normalizeOrderStatus(order.status) !== "Delivered" && order.deliveryConfirmationStatus !== "pending"
+            ? !isDriverDeliveryApproved(order)
             : true;
       if (!matchesStatus) return false;
       const searchableText = [
@@ -3707,7 +3715,7 @@
       const status = document.createElement("span");
       const deliveryStatusClass = listedOrder.deliveryConfirmationStatus === "pending"
         ? "awaiting"
-        : normalizeOrderStatus(listedOrder.status) === "Delivered"
+        : isDriverDeliveryApproved(listedOrder)
           ? "delivered"
           : listedOrder.deliveryConfirmationStatus === "rejected"
             ? "rejected"
@@ -3767,8 +3775,10 @@
     const deliveryForm = $("#shaafici-driver-delivery-form");
     const isAssignedDriver = cloudDeployment && cloudRole === "driver";
     const orderStatus = normalizeOrderStatus(order.status);
-    const canSubmitDelivery = isAssignedDriver && orderStatus === "In progress"
-      && order.deliveryConfirmationStatus !== "pending";
+    const canSubmitDelivery = isAssignedDriver
+      && ["In progress", "Delivered"].includes(orderStatus)
+      && order.deliveryConfirmationStatus !== "pending"
+      && !isDriverDeliveryApproved(order);
     $("#shaafici-driver-take").hidden = !isAssignedDriver || orderStatus !== "Pending"
       || order.approvalStatus === "pending";
     deliveryForm.hidden = !canSubmitDelivery;
@@ -3835,8 +3845,9 @@
     const driver = drivers.find((entry) => entry.phone === cloudDriverKey);
     const driverOrders = driver && getOrdersForDriver(driver, getDriverDateRange());
     const order = driverOrders?.[selectedShaaficiOrderIndex];
-    if (!order || normalizeOrderStatus(order.status) !== "In progress"
-      || order.deliveryConfirmationStatus === "pending") {
+    if (!order || !["In progress", "Delivered"].includes(normalizeOrderStatus(order.status))
+      || order.deliveryConfirmationStatus === "pending"
+      || isDriverDeliveryApproved(order)) {
       status.textContent = "This transfer cannot be submitted for delivery approval.";
       status.classList.add("error");
       return;
@@ -7091,8 +7102,8 @@
       showToast("This delivery is waiting for admin approval before its status can change.");
       return;
     }
-    const statuses = ["Pending", "In progress", "Delivered", "Cancelled"];
     const previousStatus = normalizeOrderStatus(order.status);
+    const statuses = ["Pending", "In progress", "Delivered", "Cancelled"];
     const nextStatus = statuses[(statuses.indexOf(previousStatus) + 1) % statuses.length];
     const previousCatalog = productCatalog.map((item) => ({
       ...item,
@@ -7399,6 +7410,14 @@
   $("#shaafici-driver-period").addEventListener("change", renderShaaficiDrivers);
   $("#shaafici-driver-date").addEventListener("change", renderShaaficiDrivers);
   $("#shaafici-driver-delivery-filter").addEventListener("change", renderShaaficiDrivers);
+  $$(".driver-delivery-summary [data-driver-delivery-filter]").forEach((card) => {
+    card.addEventListener("click", () => {
+      $("#shaafici-driver-delivery-filter").value = card.dataset.driverDeliveryFilter;
+      $("#shaafici-driver-delivery-search").value = "";
+      renderShaaficiDrivers();
+      $("#shaafici-driver-delivery-list").scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
   $("#shaafici-driver-delivery-search").addEventListener("input", renderShaaficiDrivers);
   $("#shaafici-driver-search").addEventListener("input", renderShaaficiDrivers);
   $("#shaafici-driver-delivery-form").addEventListener("submit", submitShaaficiDriverDelivery);
@@ -7769,6 +7788,7 @@
       "#catalog-overview-filter-clear", ".table-pagination-arrow", ".table-view-button",
       "#transfer-history-clear-date", "#report-clear-filters", "#users-refresh",
       "#toggle-driver-directory", "#show-shaafici-drivers", "#shaafici-driver-options button",
+      ".driver-delivery-summary > button",
       "#shaafici-driver-delivery-list button", "#shaafici-order-previous", "#shaafici-order-next",
       "#previous-order", "#next-order", ".icon-button", '[data-action="history"]',
       "#catalog-preview-close", ".catalog-history-button", ".catalog-product-history-link",

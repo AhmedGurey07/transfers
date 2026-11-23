@@ -7,12 +7,12 @@
   <link rel="manifest" href="manifest.webmanifest?v=20261109">
   <link rel="icon" type="image/png" sizes="256x256" href="shaafici-app-icon.png?v=20261109">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=202611230010">
+  <link rel="stylesheet" href="styles.css?v=202611230014">
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="vendor/html2canvas/html2canvas.min.js" defer></script>
-  <script src="app.js?v=202611230017" defer></script>
+  <script src="app.js?v=202611230023" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -29,7 +29,7 @@
       </label>
       <button class="button button-primary auth-submit" id="auth-submit" type="submit">Sign in</button>
       <p class="auth-copy auth-signup-note">Accounts are created by workspace admins. Ask an admin to create your account and securely share your initial password.</p>
-      <button class="button button-secondary offline-open-button" id="offline-open" type="button" hidden>Open cached workspace (read-only)</button>
+      <button class="button button-secondary offline-open-button" id="offline-open" type="button" hidden><span id="offline-open-label-full"></span><span class="offline-open-label-mobile">Open cached workspace</span></button>
       <p class="auth-copy offline-cache-note" id="offline-cache-note" hidden>Cached data is on this device and can be viewed by anyone using this browser profile. Sign out to clear its offline copy.</p>
       <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
     </form>
@@ -475,10 +475,10 @@
         <section class="panel shaafici-driver-panel" id="shaafici-driver-panel" aria-labelledby="shaafici-driver-panel-title" hidden>
           <div class="panel-heading"><div><h2 id="shaafici-driver-panel-title">SHAAFICI Drivers</h2><p id="shaafici-driver-panel-description">Select a driver to review their orders one at a time.</p></div></div>
           <div class="driver-delivery-summary" aria-label="Delivery totals">
-            <div><strong id="shaafici-summary-assigned">0</strong><span>Assigned</span></div>
-            <div><strong id="shaafici-summary-delivered">0</strong><span>Delivered</span></div>
-            <div><strong id="shaafici-summary-awaiting">0</strong><span>Awaiting approval</span></div>
-            <div><strong id="shaafici-summary-not-delivered">0</strong><span>Not delivered</span></div>
+            <button id="shaafici-summary-assigned-card" type="button" data-driver-delivery-filter="all" aria-controls="shaafici-driver-delivery-list" aria-pressed="false" title="Show all assigned transfers"><strong id="shaafici-summary-assigned">0</strong><span>Assigned</span></button>
+            <button id="shaafici-summary-delivered-card" type="button" data-driver-delivery-filter="delivered" aria-controls="shaafici-driver-delivery-list" aria-pressed="false" title="Show delivered transfers"><strong id="shaafici-summary-delivered">0</strong><span>Delivered</span></button>
+            <button id="shaafici-summary-awaiting-card" type="button" data-driver-delivery-filter="awaiting" aria-controls="shaafici-driver-delivery-list" aria-pressed="false" title="Show transfers awaiting approval"><strong id="shaafici-summary-awaiting">0</strong><span>Awaiting approval</span></button>
+            <button class="driver-delivery-summary-not-delivered" id="shaafici-summary-not-delivered-card" type="button" data-driver-delivery-filter="not-delivered" aria-controls="shaafici-driver-delivery-list" aria-pressed="false" title="Show not delivered transfers"><strong id="shaafici-summary-not-delivered">0</strong><span>Not delivered</span></button>
           </div>
           <section class="driver-analytics-grid" id="shaafici-driver-activity" aria-label="Driver activity charts" hidden>
             <article class="analytics-card driver-analytics-card">

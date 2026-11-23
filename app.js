@@ -2,6 +2,9 @@
   const STORAGE_KEY = "ahmed-gurey-orders-v1";
   const DRIVERS_STORAGE_KEY = "ahmed-gurey-drivers-v1";
   const THEME_STORAGE_KEY = "shaafici-order-desk-theme";
+  const OFFLINE_CACHE_DB = "shaafici-order-desk-offline-v1";
+  const OFFLINE_CACHE_STORE = "workspace";
+  const OFFLINE_CACHE_KEY = "shaafici-order-desk-offline-info";
   let currentTheme = localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
   document.documentElement.dataset.theme = currentTheme;
   const cloudDeployment = location.protocol !== "file:"
@@ -139,6 +142,8 @@
   let cloudUser = null;
   let cloudRole = "staff";
   let cloudDriverKey = "";
+  let offlineReadOnly = false;
+  let preferredOfflineUserId = "";
   let currentPreparedBy = "Eng Ahmed Gurey";
   let workspaceUsers = [];
   let cloudChannel = null;
@@ -1506,6 +1511,11 @@
     event.preventDefault();
     const form = $("#returned-tile-form");
     const status = $("#returned-tile-status");
+    if (offlineReadOnly) {
+      status.textContent = "Offline access is read-only. Reconnect and reload before making changes.";
+      status.classList.add("error");
+      return;
+    }
     if (!form.reportValidity()) return;
     status.classList.remove("error");
     if (!cloudUser || !supabaseClient) {
@@ -1597,6 +1607,7 @@
       status.textContent = existing
         ? "Return changes saved. Catalog stock was not changed."
         : "Return saved. Catalog stock was not changed.";
+      await saveOfflineSnapshot();
       renderReturnedTiles();
       renderItemHistory();
       showToast(existing ? "Returned tile updated." : "Returned tile saved.");
@@ -1735,6 +1746,7 @@
     status.hidden = false;
     status.classList.remove("error");
     try {
+      if (offlineReadOnly) throw new Error("Offline access is read-only. Reconnect and reload before making changes.");
       if (!file) return;
       if (!cloudUser || !supabaseClient) throw new Error("Sign in before importing returned-tile history.");
       if (returnedTilesSetupError) throw new Error(returnedTilesSetupError);
@@ -1794,6 +1806,7 @@
         messages.push(`loaded recorder names for ${recorderUpdates.length.toLocaleString("en")} existing returns`);
       }
       status.textContent = `${messages.join(" and ")}. Catalog stock was not changed.`;
+      await saveOfflineSnapshot();
       renderReturnedTiles();
       renderItemHistory();
       showToast(messages.join(" and ") + ".");
@@ -1808,6 +1821,148 @@
     const status = $("#sync-status");
     status.textContent = message;
     status.classList.toggle("error", isError);
+  }
+
+  function openOfflineCacheDatabase() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) {
+        reject(new Error("This browser does not support offline storage."));
+        return;
+      }
+      const request = window.indexedDB.open(OFFLINE_CACHE_DB, 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore(OFFLINE_CACHE_STORE);
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("Could not open offline storage."));
+      request.onblocked = () => reject(new Error("Offline storage is blocked by another browser tab."));
+    });
+  }
+
+  function readOfflineCacheInfo() {
+    try {
+      const stored = localStorage.getItem(OFFLINE_CACHE_KEY);
+      if (!stored) return null;
+      const info = JSON.parse(stored);
+      return info && typeof info.userId === "string" && typeof info.email === "string"
+        && Number.isFinite(info.savedAt)
+        ? info
+        : null;
+    } catch (error) {
+      console.warn("Could not read the offline workspace information.", error);
+      return null;
+    }
+  }
+
+  function updateOfflineAccessButton() {
+    const button = $("#offline-open");
+    const note = $("#offline-cache-note");
+    if (!button || !note) return;
+    const info = readOfflineCacheInfo();
+    const available = Boolean(info && (!preferredOfflineUserId || info.userId === preferredOfflineUserId));
+    button.hidden = !available;
+    note.hidden = !available;
+    if (available) {
+      button.textContent = `Open cached workspace for ${info.email} (read-only)`;
+    }
+  }
+
+  async function saveOfflineSnapshot() {
+    if (!cloudDeployment || !cloudUser?.id || offlineReadOnly) return false;
+    const snapshot = {
+      version: 1,
+      savedAt: Date.now(),
+      user: {
+        id: cloudUser.id,
+        email: cloudUser.email || "",
+        user_metadata: cloudUser.user_metadata || {}
+      },
+      role: cloudRole,
+      driverKey: cloudDriverKey,
+      orders,
+      drivers,
+      catalog: cloudRole === "driver" ? null : currentCatalogData(),
+      returnedTiles: cloudRole === "driver" ? [] : returnedTiles,
+      returnedTilesSetupError,
+      catalogApprovals: cloudRole === "driver" ? [] : catalogApprovals,
+      workspaceUsers: ["owner", "admin"].includes(cloudRole) ? workspaceUsers : []
+    };
+    let database;
+    try {
+      database = await openOfflineCacheDatabase();
+      await new Promise((resolve, reject) => {
+        const transaction = database.transaction(OFFLINE_CACHE_STORE, "readwrite");
+        transaction.objectStore(OFFLINE_CACHE_STORE).put(snapshot, "current");
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error || new Error("Could not save the offline workspace."));
+        transaction.onabort = () => reject(transaction.error || new Error("Offline workspace storage was aborted."));
+      });
+      localStorage.setItem(OFFLINE_CACHE_KEY, JSON.stringify({
+        version: 1,
+        userId: snapshot.user.id,
+        email: snapshot.user.email,
+        savedAt: snapshot.savedAt
+      }));
+      updateOfflineAccessButton();
+      return true;
+    } catch (error) {
+      console.error("Could not save the read-only offline workspace.", error);
+      setSyncStatus(`Offline copy unavailable — ${error.message}`, true);
+      return false;
+    } finally {
+      database?.close();
+    }
+  }
+
+  async function loadOfflineSnapshot() {
+    const info = readOfflineCacheInfo();
+    if (!info || preferredOfflineUserId && info.userId !== preferredOfflineUserId) {
+      throw new Error("No offline copy is available for this signed-in account.");
+    }
+    const database = await openOfflineCacheDatabase();
+    try {
+      const snapshot = await new Promise((resolve, reject) => {
+        const transaction = database.transaction(OFFLINE_CACHE_STORE, "readonly");
+        const request = transaction.objectStore(OFFLINE_CACHE_STORE).get("current");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error("Could not read the offline workspace."));
+      });
+      if (!snapshot || snapshot.version !== 1 || snapshot.user?.id !== info.userId
+        || !Number.isFinite(snapshot.savedAt) || snapshot.savedAt <= 0
+        || !["owner", "admin", "staff", "driver"].includes(snapshot.role)
+        || !Array.isArray(snapshot.orders) || !Array.isArray(snapshot.drivers)) {
+        throw new Error("The saved offline workspace is incomplete. Connect to the internet and sign in to refresh it.");
+      }
+      return snapshot;
+    } finally {
+      database.close();
+    }
+  }
+
+  async function clearOfflineSnapshot() {
+    try {
+      localStorage.removeItem(OFFLINE_CACHE_KEY);
+    } catch (error) {
+      console.error("Could not clear offline workspace information.", error);
+    }
+    updateOfflineAccessButton();
+    if (!window.indexedDB) return;
+    let database;
+    try {
+      database = await openOfflineCacheDatabase();
+      await new Promise((resolve, reject) => {
+        const transaction = database.transaction(OFFLINE_CACHE_STORE, "readwrite");
+        transaction.objectStore(OFFLINE_CACHE_STORE).delete("current");
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error || new Error("Could not clear the offline workspace."));
+        transaction.onabort = () => reject(transaction.error || new Error("Offline workspace cleanup was aborted."));
+      });
+    } catch (error) {
+      console.error("Could not clear the cached offline workspace.", error);
+      showToast("Could not completely clear this device's offline workspace.");
+    } finally {
+      database?.close();
+    }
   }
 
   function validateSyncedSourceData(data) {
@@ -1924,6 +2079,7 @@
   }
 
   async function saveCatalogToCloud(data = currentCatalogData(), syncWorkbook = true) {
+    if (offlineReadOnly) throw new Error("Offline access is read-only. Reconnect and reload before making changes.");
     if (!supabaseClient || !cloudUser) {
       throw new Error("Sign in to save catalog changes to the database.");
     }
@@ -1934,6 +2090,7 @@
     }, { onConflict: "catalog_key" });
     if (error) throw error;
     if (syncWorkbook) await syncCatalogToWorkbook(data);
+    await saveOfflineSnapshot();
   }
 
   async function loadCatalogFromCloud() {
@@ -1978,6 +2135,10 @@
   }
 
   async function uploadWorkbook(file) {
+    if (offlineReadOnly) {
+      setSyncStatus("Offline access is read-only. Reconnect and reload before uploading a workbook.", true);
+      return;
+    }
     if (!file) return;
     const fileApp = location.protocol === "file:";
     const localServer = fileApp || location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname);
@@ -2065,6 +2226,51 @@
     $("#auth-form").hidden = false;
     $("#invite-signup-form").hidden = true;
     setAuthStatus(message, isError);
+    updateOfflineAccessButton();
+  }
+
+  async function openOfflineWorkspace() {
+    const button = $("#offline-open");
+    button.disabled = true;
+    try {
+      const snapshot = await loadOfflineSnapshot();
+      cloudUser = snapshot.user;
+      cloudRole = snapshot.role;
+      cloudDriverKey = snapshot.driverKey || "";
+      preferredOfflineUserId = snapshot.user.id;
+      orders = loadOrders(snapshot.orders);
+      drivers = loadDrivers(snapshot.drivers);
+      returnedTiles = Array.isArray(snapshot.returnedTiles) ? snapshot.returnedTiles : [];
+      returnedTilesSetupError = snapshot.returnedTilesSetupError || "";
+      catalogApprovals = Array.isArray(snapshot.catalogApprovals) ? snapshot.catalogApprovals : [];
+      workspaceUsers = Array.isArray(snapshot.workspaceUsers) ? snapshot.workspaceUsers : [];
+      if (snapshot.catalog) applySyncedSourceData(snapshot.catalog);
+      if (cloudRole === "driver") {
+        selectedShaaficiDriverPhone = drivers.find((driver) =>
+          driver.phone.replace(/\D/g, "") === cloudDriverKey.replace(/\D/g, "")
+        )?.phone || drivers[0]?.phone || "";
+        selectedShaaficiOrderIndex = 0;
+      }
+
+      offlineReadOnly = true;
+      $("#auth-gate").hidden = true;
+      $("#app-shell").hidden = false;
+      renderLoadedApp();
+      $("#app-shell").classList.add("offline-read-only");
+      $("#offline-read-only-banner").hidden = false;
+      $("#offline-reload").hidden = !navigator.onLine;
+      $("#storage-description").textContent = `Offline read-only copy for ${snapshot.user.email || "workspace member"}.`;
+      setSyncStatus(`Offline · read-only copy saved ${new Intl.DateTimeFormat("en", {
+        dateStyle: "medium",
+        timeStyle: "short"
+      }).format(snapshot.savedAt)}.`, true);
+    } catch (error) {
+      console.error("Could not open the offline workspace.", error);
+      setAuthStatus(error.message || "Could not open the cached workspace.", true);
+    } finally {
+      button.disabled = false;
+      updateOfflineAccessButton();
+    }
   }
 
   function setInviteSignupStatus(message, isError = false) {
@@ -2205,6 +2411,11 @@
 
   async function saveOwnProfile(event) {
     event.preventDefault();
+    if (offlineReadOnly) {
+      $("#profile-status").textContent = "Offline access is read-only. Reconnect and reload before making changes.";
+      $("#profile-status").classList.add("error");
+      return;
+    }
     if (!cloudUser) return;
     const submit = $("#save-profile");
     const name = $("#profile-username").value.trim();
@@ -2243,6 +2454,7 @@
       renderAccountAvatar(cloudUser);
       prepareProfileForm();
       status.textContent = "Profile saved.";
+      await saveOfflineSnapshot();
     } catch (error) {
       console.error("Could not save your profile.", error);
       status.textContent = error.message || "Could not save your profile.";
@@ -2379,6 +2591,7 @@
     if ($("#reports-view").classList.contains("active")) renderReports();
     refreshPreview();
     setSyncStatus("Online · orders and drivers sync across signed-in devices.");
+    await saveOfflineSnapshot();
   }
 
   async function loadDriverCloudData() {
@@ -2402,6 +2615,7 @@
     renderSavedDrivers();
     renderAllOrders();
     setSyncStatus("Online · showing orders assigned to your linked driver.");
+    await saveOfflineSnapshot();
   }
 
   function setUsersStatus(message, isError = false) {
@@ -2411,6 +2625,7 @@
   }
 
   async function invokeUserManagement(body) {
+    if (offlineReadOnly) throw new Error("Offline access is read-only. Reconnect and reload before making changes.");
     const { data, error } = await supabaseClient.functions.invoke("manage-users", { body });
     const explainError = (message) => {
       if (message === "Unknown user-management action." && body.action === "create") {
@@ -2438,6 +2653,7 @@
   }
 
   async function invokeWorkflowManagement(body) {
+    if (offlineReadOnly) throw new Error("Offline access is read-only. Reconnect and reload before making changes.");
     const { data, error } = await supabaseClient.functions.invoke("manage-workflows", { body });
     if (error) {
       let message = error.message || "Could not complete the workflow request.";
@@ -2456,6 +2672,7 @@
   }
 
   async function invokeDriverDelivery(body) {
+    if (offlineReadOnly) throw new Error("Offline access is read-only. Reconnect and reload before making changes.");
     const { data, error } = await supabaseClient.functions.invoke("manage-driver-deliveries", { body });
     if (error) {
       let message = error.message || "Could not submit the delivery confirmation.";
@@ -2564,6 +2781,11 @@
   }
 
   async function loadWorkspaceUsers() {
+    if (offlineReadOnly) {
+      renderWorkspaceUsers();
+      setUsersStatus("Showing the last cached user list. Reconnect and reload to refresh it.");
+      return;
+    }
     if (!["owner", "admin"].includes(cloudRole)) {
       setUsersStatus("Only workspace admins can manage users.", true);
       return;
@@ -2575,6 +2797,7 @@
       workspaceUsers = result.users;
       renderWorkspaceUsers();
       resetManagedUserForm();
+      await saveOfflineSnapshot();
     } catch (error) {
       console.error("Could not load workspace users.", error);
       setUsersStatus(error.message, true);
@@ -2630,6 +2853,10 @@
 
   async function saveWorkspaceUser(event) {
     event.preventDefault();
+    if (offlineReadOnly) {
+      setUsersStatus("Offline access is read-only. Reconnect and reload before making changes.", true);
+      return;
+    }
     if (!["owner", "admin"].includes(cloudRole)) {
       setUsersStatus("Only workspace admins can manage users.", true);
       return;
@@ -2714,6 +2941,7 @@
     status.hidden = false;
     status.classList.remove("error");
     try {
+      if (offlineReadOnly) throw new Error("Offline access is read-only. Reconnect and reload before restoring a backup.");
       if (!cloudDeployment || !cloudUser || !["owner", "admin"].includes(cloudRole)) {
         throw new Error("Only signed-in workspace admins can restore a backup.");
       }
@@ -2818,7 +3046,13 @@
   async function activateCloudSession(user) {
     if (cloudActivationPromise) return cloudActivationPromise;
     const activation = (async () => {
+      offlineReadOnly = false;
+      preferredOfflineUserId = user.id;
+      $("#app-shell").classList.remove("offline-read-only");
+      $("#offline-read-only-banner").hidden = true;
+      updateOfflineAccessButton();
       cloudUser = user;
+      workspaceUsers = [];
       currentPreparedBy = createdByForUser(user);
       form.elements.preparedBy.value = currentPreparedBy;
       setAuthStatus("Loading your online orders…");
@@ -2855,11 +3089,13 @@
           await loadCloudData(true);
           await applyYesterdayOrderTransfers();
         }
+        if (["owner", "admin"].includes(cloudRole)) await loadWorkspaceUsers();
         $("#auth-gate").hidden = true;
         $("#app-shell").hidden = false;
         $("#storage-description").textContent = `Signed in as ${user.email || "workspace member"}.`;
         renderLoadedApp();
         subscribeToCloudChanges();
+        await saveOfflineSnapshot();
         if (driverRoleSchemaMissing && ["owner", "admin"].includes(cloudRole)) {
           setSyncStatus("Driver accounts are unavailable until the updated Supabase schema is applied.", true);
         }
@@ -2888,6 +3124,11 @@
     if (cloudChannel && supabaseClient) supabaseClient.removeChannel(cloudChannel);
     cloudChannel = null;
     clearTimeout(cloudRefreshTimer);
+    offlineReadOnly = false;
+    preferredOfflineUserId = "";
+    $("#app-shell").classList.remove("offline-read-only");
+    $("#offline-read-only-banner").hidden = true;
+    void clearOfflineSnapshot();
     resetForm();
     cloudUser = null;
     cloudRole = "staff";
@@ -2945,7 +3186,10 @@
       if (error) throw error;
       if (data.session?.user && invitationSetupPending) showInvitationSignup(data.session.user);
       else if (data.session?.user) activateCloudSession(data.session.user);
-      else showAuthGate("Sign in to load your shared online workspace.");
+      else {
+        preferredOfflineUserId = "";
+        showAuthGate("Sign in to load your shared online workspace.");
+      }
     }).catch((error) => {
       console.error("Could not check the online sign-in session.", error);
       showAuthGate(`Could not connect to Supabase: ${error.message}`, true);
@@ -3082,6 +3326,10 @@
   }
 
   async function persistOrders(changedOrder) {
+    if (offlineReadOnly) {
+      showToast("Offline access is read-only. Reconnect and reload before making changes.");
+      return false;
+    }
     if (cloudDeployment) {
       if (!supabaseClient || !cloudUser) {
         showToast("Sign in before saving orders online.");
@@ -3102,6 +3350,7 @@
       } catch (error) {
         console.warn("Could not keep a local order backup.", error);
       }
+      await saveOfflineSnapshot();
       return true;
     }
     try {
@@ -3131,6 +3380,10 @@
   }
 
   async function persistDrivers() {
+    if (offlineReadOnly) {
+      showToast("Offline access is read-only. Reconnect and reload before making changes.");
+      return false;
+    }
     if (cloudDeployment) {
       if (!supabaseClient || !cloudUser) {
         showToast("Sign in before saving drivers online.");
@@ -3154,6 +3407,7 @@
       } catch (error) {
         console.warn("Could not keep a local driver backup.", error);
       }
+      await saveOfflineSnapshot();
       return true;
     }
     try {
@@ -3544,6 +3798,7 @@
   }
 
   async function saveShaaficiDriverOrderAction(order, action, details = {}) {
+    if (offlineReadOnly) throw new Error("Offline access is read-only. Reconnect and reload before making changes.");
     const result = await invokeDriverDelivery({ action, orderId: order.id, ...details });
     if (!result?.order || result.order.id !== order.id) {
       throw new Error("The transfer update was submitted, but the updated transfer was not returned. Reload to check its status.");
@@ -3560,6 +3815,7 @@
     } catch (error) {
       console.warn("Could not keep a local backup of the driver transfer update.", error);
     }
+    await saveOfflineSnapshot();
     renderSavedDrivers();
     renderAllOrders();
     showToast(action === "take"
@@ -3687,6 +3943,10 @@
   }
 
   async function saveDriver(nameInput, phoneInput, assignToOrder = false) {
+    if (offlineReadOnly) {
+      showToast("Offline access is read-only. Reconnect and reload before making changes.");
+      return false;
+    }
     const name = nameInput.value.trim();
     const phone = phoneInput.value.trim();
     if (!name || !phone) {
@@ -4175,6 +4435,10 @@
   }
 
   async function importOrderPdf(file) {
+    if (offlineReadOnly) {
+      showToast("Offline access is read-only. Reconnect and reload before importing an order.");
+      return;
+    }
     const status = $("#pdf-import-status");
     status.hidden = false;
     status.classList.remove("error", "duplicate-warning");
@@ -6180,6 +6444,11 @@
 
   async function saveScheduledReport(event) {
     event.preventDefault();
+    if (offlineReadOnly) {
+      $("#scheduled-report-status").textContent = "Offline access is read-only. Reconnect and reload before making changes.";
+      $("#scheduled-report-status").classList.add("error");
+      return;
+    }
     const frequency = $("#scheduled-report-frequency").value;
     if (!["off", "daily", "weekly"].includes(frequency)) {
       $("#scheduled-report-status").textContent = "Choose a valid report schedule.";
@@ -7288,6 +7557,11 @@
     }
   });
   $("#sign-out").addEventListener("click", async () => {
+    if (offlineReadOnly) {
+      lockCloudApp();
+      showToast("Offline copy cleared from this device.");
+      return;
+    }
     if (!supabaseClient) return;
     const { error } = await supabaseClient.auth.signOut();
     if (error) {
@@ -7417,6 +7691,8 @@
   function renderLoadedApp() {
     const isDriver = cloudDeployment && cloudRole === "driver";
     $("#app-shell").hidden = false;
+    $("#app-shell").classList.toggle("offline-read-only", offlineReadOnly);
+    $("#offline-read-only-banner").hidden = !offlineReadOnly;
     $("#auth-gate").hidden = true;
     $("#sign-out").hidden = !cloudDeployment;
     $$("[data-view]").forEach((link) => {
@@ -7473,7 +7749,7 @@
     updateConverter();
     if (needsMoneyDataCleanup && !cloudDeployment) persistOrders();
     renderOverview();
-    if (!isDriver) runScheduledReports();
+    if (!isDriver && !offlineReadOnly) runScheduledReports();
     refreshPreview();
     if (!cloudDeployment && (location.protocol === "file:"
       || location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname))) {
@@ -7482,6 +7758,71 @@
     }
     if (isDriver) setView("drivers", { recordHistory: false, confirmUnsaved: false });
   }
+
+  function isOfflineReadOnlyButtonAllowed(button) {
+    const safeButtons = [
+      "#mobile-menu-toggle", "#mobile-nav-backdrop", "#app-back-button", "#theme-toggle",
+      "#account-avatar", "#sidebar-account-profile", "#sign-out", "#offline-reload",
+      "[data-overview-stat]", '[data-action="all-orders"]', '[data-action="cancel-order"]',
+      "#notifications-mark-read", "#history-show-all", "#export-data", "#export-catalog",
+      "#export-returned-tiles", "#export-report", "#catalog-filter-apply", "#catalog-filter-cancel",
+      "#catalog-overview-filter-clear", ".table-pagination-arrow", ".table-view-button",
+      "#transfer-history-clear-date", "#report-clear-filters", "#users-refresh",
+      "#toggle-driver-directory", "#show-shaafici-drivers", "#shaafici-driver-options button",
+      "#shaafici-driver-delivery-list button", "#shaafici-order-previous", "#shaafici-order-next",
+      "#previous-order", "#next-order", ".icon-button", '[data-action="history"]',
+      "#catalog-preview-close", ".catalog-history-button", ".catalog-product-history-link",
+      ".catalog-row-expand-button", "#print-order", "#back-from-preview", "#preview-receipt",
+      "#preview-full-page", "#print-order-now", "#download-pdf", "#take-receipt-screenshot",
+      "#profile-cancel", "#cancel-user-edit", "#catalog-edit-cancel", "#catalog-adjust-cancel",
+      "#cancel-returned-tile-edit", ".catalog-filter-menu button",
+      ".catalog-filter-submenu button", ".catalog-filter-actions button"
+    ];
+    return button.matches(safeButtons.join(","))
+      || button.matches("[aria-expanded], [aria-label^='Open'], [aria-label^='View']");
+  }
+
+  document.addEventListener("submit", (event) => {
+    if (!offlineReadOnly || !(event.target instanceof HTMLFormElement)
+      || !event.target.closest("#app-shell")) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    showToast("Offline access is read-only. Reconnect and reload before making changes.");
+  }, true);
+  document.addEventListener("click", (event) => {
+    if (!offlineReadOnly || !(event.target instanceof Element)) return;
+    const button = event.target.closest("button");
+    if (!button || !button.closest("#app-shell") || isOfflineReadOnlyButtonAllowed(button)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    showToast("Offline access is read-only. Reconnect and reload before making changes.");
+  }, true);
+  document.addEventListener("change", (event) => {
+    if (!offlineReadOnly || !(event.target instanceof HTMLInputElement)
+      || event.target.type !== "file" || !event.target.closest("#app-shell")) return;
+    event.preventDefault();
+    event.target.value = "";
+    showToast("File imports are unavailable in read-only offline mode.");
+  }, true);
+
+  window.addEventListener("offline", () => {
+    if (!cloudUser || cloudActivationPromise || offlineReadOnly) return;
+    const cacheSave = saveOfflineSnapshot();
+    offlineReadOnly = true;
+    $("#app-shell").classList.add("offline-read-only");
+    $("#offline-read-only-banner").hidden = false;
+    $("#offline-reload").hidden = true;
+    $("#storage-description").textContent = `Offline read-only copy for ${cloudUser.email || "workspace member"}.`;
+    setSyncStatus("Offline · cached workspace is read-only. Reconnect and reload to edit.", true);
+    void cacheSave;
+  });
+  window.addEventListener("online", () => {
+    if (!offlineReadOnly) return;
+    $("#offline-reload").hidden = false;
+    setSyncStatus("Connection restored · reload to refresh data and resume editing.");
+  });
+  $("#offline-reload").addEventListener("click", () => location.reload());
+  $("#offline-open").addEventListener("click", openOfflineWorkspace);
 
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
     navigator.serviceWorker.register("service-worker.js")

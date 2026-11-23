@@ -48,6 +48,14 @@ The Supabase URL and anon/publishable key are browser-visible identifiers, not p
 
 The website caches its app files and sign-in library after the first visit, and loads the Excel library only when an Excel feature is used. Repeat visits need less bandwidth; signing in and loading or saving shared workspace data still require an internet connection.
 
+## Read-only offline access
+
+For reliable app-shell caching across offline page loads, use the hosted HTTPS site or a localhost web server; `file://` pages do not register the service worker, and browser storage support for them varies. First visit the site online, sign in, and let the workspace finish loading so the app shell and your permitted workspace data are cached on that browser profile. Owners/admins also need the online user list to load successfully for it to be included.
+
+If the connection drops during an active session, the app switches to read-only mode. To open the cached workspace after a reload, choose **Open cached workspace (read-only)** on the sign-in screen. Filters, navigation, and viewing remain available; creating, editing, approving, importing, and other data changes require reconnecting and reloading. The offline copy reflects the last successful online refresh and can be stale. Changes made elsewhere, access revocations, and account changes cannot be detected until the device reconnects.
+
+The cached copy is stored locally in the browser and is not encrypted. Anyone with access to that browser profile can view it offline. Use only a trusted device and choose **Sign out** to clear the local copy. Offline access is limited to the data allowed for that account when it last refreshed; it is not shared or synchronized between devices.
+
 ## Existing browser data
 
 The first owner, admin, or staff sign-in on each browser imports its saved orders that are not already online; existing online records win if an order ID already exists. Saved drivers are added if their names are not already present. Driver accounts do not import local browser data. Keep the old browser data until you verify the migrated orders on the online site.

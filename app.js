@@ -2,9 +2,51 @@
   const STORAGE_KEY = "ahmed-gurey-orders-v1";
   const DRIVERS_STORAGE_KEY = "ahmed-gurey-drivers-v1";
   const THEME_STORAGE_KEY = "shaafici-order-desk-theme";
-  const OFFLINE_CACHE_DB = "shaafici-order-desk-offline-v1";
+  const ACTIVE_LOCATION_KEY = "shaafici-order-desk-active-location-v1";
+  const OFFLINE_CACHE_DB = "shaafici-order-desk-offline-v2";
   const OFFLINE_CACHE_STORE = "workspace";
-  const OFFLINE_CACHE_KEY = "shaafici-order-desk-offline-info";
+  const OFFLINE_CACHE_KEY = "shaafici-order-desk-offline-info-v2";
+  const WORKSPACE_LOCATIONS = [
+    { id: "warehouse-200", name: "Warehouse 200", type: "warehouse" },
+    { id: "warehouse-150", name: "Warehouse 150", type: "warehouse" },
+    { id: "main-branch-store", name: "Main Branch Store", type: "store" },
+    { id: "jjr-store", name: "JJR Store", type: "store" },
+    { id: "idc-store", name: "IDC Store", type: "store" },
+    { id: "nh-store", name: "NH Store", type: "store" },
+    { id: "dum-store", name: "Dum Store", type: "store" },
+    { id: "borama-store", name: "Borama Store", type: "store" },
+    { id: "elec-store", name: "ELEC Store", type: "store" }
+  ];
+  const WORKSPACE_LOCATION_NAMES = new Map(WORKSPACE_LOCATIONS.map(({ id, name }) => [id, name]));
+  const LEGACY_BRANCH_LOCATION_ALIASES = new Map([
+    ["warehouse200", "warehouse-200"],
+    ["warehouse200k", "warehouse-200"],
+    ["wh2", "warehouse-200"],
+    ["wh200", "warehouse-200"],
+    ["warehouse150", "warehouse-150"],
+    ["warehouse150k", "warehouse-150"],
+    ["wh150", "warehouse-150"],
+    ["mainbranch", "main-branch-store"],
+    ["mainbranchstore", "main-branch-store"],
+    ["jjr", "jjr-store"],
+    ["jjrstore", "jjr-store"],
+    ["idc", "idc-store"],
+    ["idcstore", "idc-store"],
+    ["nh", "nh-store"],
+    ["nhstore", "nh-store"],
+    ["dum", "dum-store"],
+    ["dumstore", "dum-store"],
+    ["borama", "borama-store"],
+    ["boramastore", "borama-store"],
+    ["elec", "elec-store"],
+    ["elecstore", "elec-store"]
+  ]);
+  const DEFAULT_LOCATION_ID = "warehouse-200";
+  function workspaceLocalStorageKey(key) {
+    return cloudDeployment && cloudUser?.id
+      ? `${key}:${cloudUser.id}:${activeLocationId}`
+      : key;
+  }
   let currentTheme = localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
   document.documentElement.dataset.theme = currentTheme;
   const cloudDeployment = location.protocol !== "file:"
@@ -94,6 +136,13 @@
       ]
     }
   };
+  const DEFAULT_CONVERTERS = Object.fromEntries(Object.entries(converters)
+    .map(([key, value]) => [key, { ...value }]));
+  const DEFAULT_GYPSUM_CONVERTERS = Object.fromEntries(Object.entries(gypsumConverters)
+    .map(([key, value]) => [key, {
+      ...value,
+      structural: value.structural.map((item) => ({ ...item }))
+    }]));
   let productCatalog = window.AHMED_GUREY_PRODUCTS;
   let catalogStockFilter = "all";
   let scheduledReportFrequency = "off";
@@ -142,6 +191,11 @@
   let cloudUser = null;
   let cloudRole = "staff";
   let cloudDriverKey = "";
+  let cloudLocationId = "";
+  let activeLocationId = WORKSPACE_LOCATION_NAMES.has(localStorage.getItem(ACTIVE_LOCATION_KEY))
+    ? localStorage.getItem(ACTIVE_LOCATION_KEY)
+    : DEFAULT_LOCATION_ID;
+  let unassignedOrders = [];
   let offlineReadOnly = false;
   let preferredOfflineUserId = "";
   let currentPreparedBy = "Eng Ahmed Gurey";
@@ -1552,6 +1606,7 @@
     ].forEach((field) => delete entry[field]);
     Object.assign(entry, {
       id: existing?.id || `return-${now}-${Math.random().toString(36).slice(2)}`,
+      locationId: existing?.locationId || activeLocationId,
       createdAt: existing?.createdAt || now,
       returnedFrom: $("#return-customer").value.trim(),
       product: $("#return-product").value.trim(),
@@ -1598,7 +1653,7 @@
           .select("id")
           .maybeSingle()
         : await supabaseClient.from("returned_tile_records")
-          .insert({ id: entry.id, data: entry })
+          .insert({ id: entry.id, location_id: activeLocationId, data: entry })
           .select("id")
           .maybeSingle();
       if (error) throw error;
@@ -1717,7 +1772,8 @@
       if (!product || !returnedFrom) continue;
       const sourceNo = returnedTileWorkbookCellText(cell(row, "sourceNo"))
         || `row-${range.s.r + rowIndex + 1}`;
-      const id = `return-legacy-${sourceNo}`;
+      const locationPrefix = activeLocationId === DEFAULT_LOCATION_ID ? "" : `${activeLocationId}-`;
+      const id = `return-legacy-${locationPrefix}${sourceNo}`;
       if (ids.has(id)) throw new Error(`The workbook contains duplicate return number "${sourceNo}".`);
       ids.add(id);
       records.push({
@@ -1763,6 +1819,7 @@
         .filter((entry) => !existingById.has(entry.id))
         .map((entry) => ({
           ...entry,
+          locationId: activeLocationId,
           createdAt: Number(entry.createdAt) || Date.now(),
           recordedBy: String(entry.recordedBy || "").trim() || usernameForUser(cloudUser)
         }));
@@ -1785,7 +1842,11 @@
       ];
       let savedRows = 0;
       try {
-        const rows = [...recorderUpdates, ...imported].map((entry) => ({ id: entry.id, data: entry }));
+        const rows = [...recorderUpdates, ...imported].map((entry) => ({
+          id: entry.id,
+          location_id: entry.locationId || activeLocationId,
+          data: entry
+        }));
         for (let offset = 0; offset < rows.length; offset += 500) {
           status.textContent = `Saving returned-tile history… ${Math.min(offset + 500, rows.length).toLocaleString("en")} of ${rows.length.toLocaleString("en")}`;
           const { error } = await supabaseClient.from("returned_tile_records")
@@ -1844,7 +1905,8 @@
       const stored = localStorage.getItem(OFFLINE_CACHE_KEY);
       if (!stored) return null;
       const info = JSON.parse(stored);
-      return info && typeof info.userId === "string" && typeof info.email === "string"
+      return info && info.version === 2 && typeof info.userId === "string"
+        && WORKSPACE_LOCATION_NAMES.has(info.locationId) && typeof info.email === "string"
         && Number.isFinite(info.savedAt)
         ? info
         : null;
@@ -1871,8 +1933,9 @@
   async function saveOfflineSnapshot() {
     if (!cloudDeployment || !cloudUser?.id || offlineReadOnly) return false;
     const snapshot = {
-      version: 1,
+      version: 2,
       savedAt: Date.now(),
+      locationId: activeLocationId,
       user: {
         id: cloudUser.id,
         email: cloudUser.email || "",
@@ -1882,6 +1945,7 @@
       driverKey: cloudDriverKey,
       orders,
       drivers,
+      unassignedOrders: ["owner", "admin"].includes(cloudRole) ? unassignedOrders : [],
       catalog: cloudRole === "driver" ? null : currentCatalogData(),
       returnedTiles: cloudRole === "driver" ? [] : returnedTiles,
       returnedTilesSetupError,
@@ -1893,14 +1957,15 @@
       database = await openOfflineCacheDatabase();
       await new Promise((resolve, reject) => {
         const transaction = database.transaction(OFFLINE_CACHE_STORE, "readwrite");
-        transaction.objectStore(OFFLINE_CACHE_STORE).put(snapshot, "current");
+        transaction.objectStore(OFFLINE_CACHE_STORE).put(snapshot, `${snapshot.user.id}:${snapshot.locationId}`);
         transaction.oncomplete = resolve;
         transaction.onerror = () => reject(transaction.error || new Error("Could not save the offline workspace."));
         transaction.onabort = () => reject(transaction.error || new Error("Offline workspace storage was aborted."));
       });
       localStorage.setItem(OFFLINE_CACHE_KEY, JSON.stringify({
-        version: 1,
+        version: 2,
         userId: snapshot.user.id,
+        locationId: snapshot.locationId,
         email: snapshot.user.email,
         savedAt: snapshot.savedAt
       }));
@@ -1924,11 +1989,13 @@
     try {
       const snapshot = await new Promise((resolve, reject) => {
         const transaction = database.transaction(OFFLINE_CACHE_STORE, "readonly");
-        const request = transaction.objectStore(OFFLINE_CACHE_STORE).get("current");
+        const request = transaction.objectStore(OFFLINE_CACHE_STORE)
+          .get(`${info.userId}:${info.locationId}`);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error || new Error("Could not read the offline workspace."));
       });
-      if (!snapshot || snapshot.version !== 1 || snapshot.user?.id !== info.userId
+      if (!snapshot || snapshot.version !== 2 || snapshot.locationId !== info.locationId
+        || snapshot.user?.id !== info.userId
         || !Number.isFinite(snapshot.savedAt) || snapshot.savedAt <= 0
         || !["owner", "admin", "staff", "driver"].includes(snapshot.role)
         || !Array.isArray(snapshot.orders) || !Array.isArray(snapshot.drivers)) {
@@ -1953,7 +2020,7 @@
       database = await openOfflineCacheDatabase();
       await new Promise((resolve, reject) => {
         const transaction = database.transaction(OFFLINE_CACHE_STORE, "readwrite");
-        transaction.objectStore(OFFLINE_CACHE_STORE).delete("current");
+        transaction.objectStore(OFFLINE_CACHE_STORE).clear();
         transaction.oncomplete = resolve;
         transaction.onerror = () => reject(transaction.error || new Error("Could not clear the offline workspace."));
         transaction.onabort = () => reject(transaction.error || new Error("Offline workspace cleanup was aborted."));
@@ -2024,6 +2091,31 @@
     refreshPreview();
   }
 
+  function clearCatalogForLocation() {
+    productCatalog = [];
+    catalogAdjustments = [];
+    catalogEditHistory = [];
+    catalogApprovals = [];
+    scheduledReportFrequency = "off";
+    Object.keys(DEFAULT_CONVERTERS).forEach((key) => {
+      converters[key] = { ...DEFAULT_CONVERTERS[key] };
+    });
+    Object.keys(DEFAULT_GYPSUM_CONVERTERS).forEach((key) => {
+      const source = DEFAULT_GYPSUM_CONVERTERS[key];
+      gypsumConverters[key] = {
+        ...source,
+        structural: source.structural.map((item) => ({ ...item }))
+      };
+    });
+    $("#scheduled-report-frequency").value = scheduledReportFrequency;
+    window.AHMED_GUREY_PRODUCTS = productCatalog;
+    indexProductCatalog();
+    renderProductCatalogOptions();
+    renderCatalogFilterOptions();
+    renderProductCatalogTable();
+    updateConverter();
+  }
+
   function currentCatalogData() {
     return {
       products: productCatalog.map((item) => ({
@@ -2086,11 +2178,12 @@
     }
     const { error } = await supabaseClient.from("workspace_catalog").upsert({
       catalog_key: "default",
+      location_id: activeLocationId,
       data,
       updated_at: new Date().toISOString()
-    }, { onConflict: "catalog_key" });
+    }, { onConflict: "location_id,catalog_key" });
     if (error) throw error;
-    if (syncWorkbook) await syncCatalogToWorkbook(data);
+    if (syncWorkbook && activeLocationId === DEFAULT_LOCATION_ID) await syncCatalogToWorkbook(data);
     await saveOfflineSnapshot();
   }
 
@@ -2099,9 +2192,11 @@
       .from("workspace_catalog")
       .select("data")
       .eq("catalog_key", "default")
+      .eq("location_id", activeLocationId)
       .maybeSingle();
     if (error) throw error;
     if (data?.data && catalogHasWorkbookColumns(data.data)) applySyncedSourceData(data.data);
+    else clearCatalogForLocation();
     return Boolean(data?.data);
   }
 
@@ -2135,6 +2230,97 @@
     showToast(`${rows.length.toLocaleString("en")} filtered products exported to Excel.`);
   }
 
+  async function readCatalogWorkbook(file) {
+    const xlsx = await loadXlsxLibrary();
+    const workbook = xlsx.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+    const worksheet = workbook.Sheets.SalesData || workbook.Sheets[workbook.SheetNames[0]];
+    if (!worksheet) throw new Error("The workbook does not contain a worksheet.");
+    const rows = xlsx.utils.sheet_to_json(worksheet, { header: 1, raw: true, defval: "" });
+    const normalizeHeader = (value) => String(value ?? "").toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
+    const aliases = {
+      product: ["product", "description", "productdescription"],
+      quantities: ["quantity", "qty"],
+      qtyItems: ["qitem", "qtyitem", "quantityitem"],
+      taken: ["taken"],
+      rQuantities: ["rquantity", "rqty", "requiredquantity"],
+      uomNs: ["uomn", "uomnumber"],
+      unit: ["uom", "unit"],
+      statuses: ["sts", "status"]
+    };
+    let columns = null;
+    let headerRow = -1;
+    for (let rowIndex = 0; rowIndex < Math.min(rows.length, 20); rowIndex += 1) {
+      const headers = new Map(rows[rowIndex].map((value, index) => [normalizeHeader(value), index]));
+      const candidate = Object.fromEntries(Object.entries(aliases).map(([field, names]) => [
+        field,
+        names.map((name) => headers.get(name)).find((index) => index !== undefined)
+      ]));
+      if (candidate.product !== undefined && candidate.quantities !== undefined) {
+        columns = candidate;
+        headerRow = rowIndex;
+        break;
+      }
+    }
+    if (!columns) {
+      throw new Error("No catalog table was found. Include PRODUCT/DESCRIPTION and QUANTITY columns.");
+    }
+    const text = (value) => value == null ? "" : String(value).trim();
+    const number = (value) => {
+      const raw = text(value).replaceAll(",", "");
+      if (!raw) return null;
+      const parsed = Number(raw);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const format = (value) => Number.isFinite(value) ? String(Number(value.toFixed(2))) : "";
+    const catalogByProduct = new Map();
+    for (const row of rows.slice(headerRow + 1)) {
+      const value = (field) => columns[field] === undefined ? "" : row[columns[field]];
+      const product = text(value("product"));
+      if (!product) continue;
+      const quantityText = text(value("quantities"));
+      const qtyItemText = text(value("qtyItems"));
+      const takenText = text(value("taken"));
+      const sourceRemainder = text(value("rQuantities"));
+      const quantity = number(quantityText);
+      const taken = number(takenText);
+      const qtyItem = number(qtyItemText);
+      const remainder = quantity !== null && taken !== null
+        ? format(quantity - taken)
+        : sourceRemainder;
+      const remainderNumber = number(remainder);
+      const uomN = remainderNumber !== null && qtyItem !== null && qtyItem !== 0
+        ? format(remainderNumber / qtyItem)
+        : text(value("uomNs"));
+      const entry = catalogByProduct.get(product.toLocaleLowerCase()) || {
+        product,
+        quantity: "",
+        quantities: [],
+        qtyItems: [],
+        taken: [],
+        rQuantities: [],
+        uomNs: [],
+        unit: "",
+        statuses: []
+      };
+      const addUnique = (field, item) => {
+        if (item && !entry[field].includes(item)) entry[field].push(item);
+      };
+      addUnique("quantities", quantityText);
+      addUnique("qtyItems", qtyItemText);
+      addUnique("taken", takenText);
+      addUnique("rQuantities", remainder);
+      addUnique("uomNs", uomN);
+      addUnique("statuses", text(value("statuses")));
+      const sourceUnit = text(value("unit")) || "PCS";
+      if (!entry.unit || entry.unit === "PCS" && sourceUnit !== "PCS") entry.unit = sourceUnit;
+      entry.quantity = entry.quantities[0] || "";
+      catalogByProduct.set(product.toLocaleLowerCase(), entry);
+    }
+    const products = [...catalogByProduct.values()];
+    if (!products.length) throw new Error("No products were found in the catalog worksheet.");
+    return products;
+  }
+
   async function uploadWorkbook(file) {
     if (offlineReadOnly) {
       setSyncStatus("Offline access is read-only. Reconnect and reload before uploading a workbook.", true);
@@ -2143,26 +2329,40 @@
     if (!file) return;
     const fileApp = location.protocol === "file:";
     const localServer = fileApp || location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname);
-    if (!localServer) {
-      setSyncStatus("Excel upload is available when using Start Order Desk.cmd.", true);
+    if (!cloudUser || !supabaseClient || !["owner", "admin"].includes(cloudRole)) {
+      setSyncStatus("Sign in as an owner or admin before uploading a catalog.", true);
       return;
     }
-    const apiBase = fileApp ? "http://127.0.0.1:8765" : "";
+    if (file.size > 25 * 1024 * 1024) {
+      setSyncStatus("Choose an Excel workbook smaller than 25 MB.", true);
+      return;
+    }
+    if (!window.confirm(`Replace the ${locationName(activeLocationId)} catalog with the products in this workbook?`)) return;
     setSyncStatus("Uploading Excel workbook…");
     try {
-      const response = await fetch(`${apiBase}/api/upload-workbook`, {
-        method: "POST",
-        body: file,
-        cache: "no-store",
-        mode: fileApp ? "cors" : "same-origin"
-      });
-      const result = await response.json();
-      if (!response.ok || !result.ok) throw new Error(result.error || "Could not upload the workbook.");
-      lastSyncedVersion = "";
-      applySyncedSourceData(result.data);
-      lastSyncedVersion = result.data.version;
-      await saveCatalogToCloud(currentCatalogData(), false);
-      setSyncStatus(`Excel catalog updated · ${result.data.products.length.toLocaleString("en")} products.`);
+      let products;
+      let catalogData;
+      if (activeLocationId === DEFAULT_LOCATION_ID && localServer) {
+        const apiBase = fileApp ? "http://127.0.0.1:8765" : "";
+        const response = await fetch(`${apiBase}/api/upload-workbook`, {
+          method: "POST",
+          body: file,
+          cache: "no-store",
+          mode: fileApp ? "cors" : "same-origin"
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || "Could not upload the workbook.");
+        products = result.data.products;
+        catalogData = result.data;
+        lastSyncedVersion = result.data.version;
+      } else {
+        products = await readCatalogWorkbook(file);
+        catalogData = { ...currentCatalogData(), products };
+      }
+      applySyncedSourceData(catalogData);
+      await saveCatalogToCloud(catalogData, false);
+      renderOverview();
+      setSyncStatus(`${locationName(activeLocationId)} catalog updated · ${products.length.toLocaleString("en")} products.`);
       showToast("Product catalog updated from Excel.");
     } catch (error) {
       console.error("Could not upload the Excel workbook.", error);
@@ -2238,9 +2438,12 @@
       cloudUser = snapshot.user;
       cloudRole = snapshot.role;
       cloudDriverKey = snapshot.driverKey || "";
+      cloudLocationId = snapshot.locationId;
+      activeLocationId = snapshot.locationId;
       preferredOfflineUserId = snapshot.user.id;
       orders = loadOrders(snapshot.orders);
       drivers = loadDrivers(snapshot.drivers);
+      unassignedOrders = Array.isArray(snapshot.unassignedOrders) ? snapshot.unassignedOrders : [];
       returnedTiles = Array.isArray(snapshot.returnedTiles) ? snapshot.returnedTiles : [];
       returnedTilesSetupError = snapshot.returnedTilesSetupError || "";
       catalogApprovals = Array.isArray(snapshot.catalogApprovals) ? snapshot.catalogApprovals : [];
@@ -2498,16 +2701,46 @@
       });
   }
 
-  async function loadCloudData(importLocalData) {
-    const [orderResult, driverResult, catalogResult, returnResult] = await Promise.all([
-      supabaseClient.from("orders").select("id,data").order("id"),
-      supabaseClient.from("drivers").select("driver_key,name,phone").order("name"),
-      supabaseClient.from("workspace_catalog").select("data").eq("catalog_key", "default").maybeSingle(),
-      supabaseClient.from("returned_tile_records").select("id,data").order("id")
+  function renderLoadedWorkspaceData() {
+    renderSavedDrivers();
+    renderOverview();
+    renderAllOrders();
+    renderUnassignedOrders();
+    renderHistory();
+    if ($("#catalog-view").classList.contains("active")) renderProductCatalogTable();
+    if ($("#returned-tiles-view").classList.contains("active")) renderReturnedTiles();
+    if ($("#reports-view").classList.contains("active")) renderReports();
+    refreshPreview();
+  }
+
+  async function loadCloudData(importLocalData, { render = true, saveSnapshot = true } = {}) {
+    const isAdmin = ["owner", "admin"].includes(cloudRole);
+    let orderQuery = supabaseClient.from("orders").select("id,data,location_id").order("id");
+    orderQuery = isAdmin
+      ? orderQuery.or(`location_id.eq.${activeLocationId},location_id.is.null`)
+      : orderQuery.eq("location_id", activeLocationId);
+    const driverQuery = supabaseClient.from("drivers")
+      .select("driver_key,name,phone,location_id")
+      .order("name");
+    const returnQuery = supabaseClient.from("returned_tile_records")
+      .select("id,data,location_id")
+      .eq("location_id", activeLocationId)
+      .order("id");
+    const onlineOrderIdsQuery = importLocalData && isAdmin
+      ? supabaseClient.from("orders").select("id")
+      : Promise.resolve({ data: null, error: null });
+    const [orderResult, driverResult, catalogResult, returnResult, onlineOrderIdsResult] = await Promise.all([
+      orderQuery,
+      driverQuery,
+      supabaseClient.from("workspace_catalog").select("data")
+        .eq("catalog_key", "default").eq("location_id", activeLocationId).maybeSingle(),
+      returnQuery,
+      onlineOrderIdsQuery
     ]);
     if (orderResult.error) throw orderResult.error;
     if (driverResult.error) throw driverResult.error;
     if (catalogResult.error) throw catalogResult.error;
+    if (onlineOrderIdsResult.error) throw onlineOrderIdsResult.error;
     if (returnResult.error) {
       if (["42P01", "PGRST205"].includes(returnResult.error.code)) {
         returnedTiles = [];
@@ -2517,7 +2750,7 @@
       }
     } else {
       returnedTilesSetupError = "";
-      returnedTiles = returnResult.data.map((row) => row.data);
+      returnedTiles = returnResult.data.map((row) => ({ ...row.data, locationId: row.location_id || "" }));
       if (returnedTiles.some((entry) => !entry || typeof entry.id !== "string"
         || typeof entry.returnedFrom !== "string" || typeof entry.product !== "string")) {
         throw new Error("The shared returned-tile history contains an invalid record.");
@@ -2526,8 +2759,13 @@
         const branch = row.data.branch ? normalizeReturnedTileBranch(row.data.branch) : row.data.branch;
         const driver = row.data.driver ? normalizeReturnedTileDriver(row.data.driver) : row.data.driver;
         if (branch === row.data.branch && driver === row.data.driver) return [];
-        returnedTiles[index] = { ...row.data, branch, driver };
-        return [{ id: row.id, data: returnedTiles[index], updated_at: new Date().toISOString() }];
+        returnedTiles[index] = { ...returnedTiles[index], branch, driver };
+        return [{
+          id: row.id,
+          location_id: row.location_id,
+          data: returnedTiles[index],
+          updated_at: new Date().toISOString()
+        }];
       });
       for (let offset = 0; offset < branchUpdates.length; offset += 500) {
         const { error } = await supabaseClient.from("returned_tile_records")
@@ -2537,76 +2775,133 @@
     }
     if (catalogResult.data?.data && catalogHasWorkbookColumns(catalogResult.data.data)) {
       applySyncedSourceData(catalogResult.data.data);
-    }
+    } else clearCatalogForLocation();
 
-    let orderData = orderResult.data.map((row) => row.data);
+    unassignedOrders = isAdmin
+      ? orderResult.data.filter((row) => !WORKSPACE_LOCATION_NAMES.has(row.location_id || ""))
+        .map((row) => ({ ...row.data, id: row.id, locationId: "" }))
+      : [];
+    let orderData = orderResult.data
+      .filter((row) => row.location_id === activeLocationId)
+      .map((row) => ({ ...row.data, id: row.id, locationId: row.location_id }));
     if (importLocalData) {
       const localOrders = loadOrders();
-      const onlineOrderIds = new Set(orderResult.data.map((row) => row.id));
-      const missingOrders = localOrders.filter((order) => !onlineOrderIds.has(order.id));
+      if (isAdmin && activeLocationId === DEFAULT_LOCATION_ID) {
+        const legacyOrders = loadOrders(localStorage.getItem(STORAGE_KEY) || "[]");
+        const knownIds = new Set(localOrders.map((order) => order.id));
+        localOrders.push(...legacyOrders.filter((order) => !knownIds.has(order.id)));
+      }
+      const scopedLocalOrders = localOrders.map((order) => ({
+        ...order,
+        locationId: WORKSPACE_LOCATION_NAMES.has(order.locationId)
+          ? order.locationId
+          : DEFAULT_LOCATION_ID
+      }));
+      const onlineOrderIds = new Set(
+        (onlineOrderIdsResult.data || orderResult.data).map((row) => row.id)
+      );
+      const missingOrders = scopedLocalOrders.filter((order) =>
+        !onlineOrderIds.has(order.id)
+        && (isAdmin || order.locationId === activeLocationId)
+      );
       if (missingOrders.length) {
         const { error } = await supabaseClient.from("orders").upsert(
-          missingOrders.map((order) => ({ id: order.id, data: order })),
+          missingOrders.map((order) => ({
+            id: order.id,
+            location_id: order.locationId || null,
+            data: order
+          })),
           { onConflict: "id" }
         );
         if (error) throw error;
-        orderData.push(...missingOrders);
+        orderData.push(...missingOrders.filter((order) => order.locationId === activeLocationId));
+        unassignedOrders.push(...missingOrders.filter((order) => !order.locationId));
         showToast(`${missingOrders.length} existing ${missingOrders.length === 1 ? "order was" : "orders were"} imported online.`);
       }
     }
 
-    const driverData = driverResult.data.map(({ name, phone }) => ({ name, phone }));
+    const driverData = driverResult.data.map(({ driver_key, name, phone }) => ({
+      driverKey: driver_key,
+      name,
+      phone
+    }));
     if (importLocalData) {
-      const knownDrivers = new Set(driverData.map((driver) => driver.phone.trim()));
-      const missingDrivers = loadDrivers().filter((driver) =>
-        !knownDrivers.has(driver.phone.trim())
-      );
+      const knownDrivers = new Set(driverData.map((driver) => driverPhoneDigits(driver.phone)));
+      const localDrivers = loadDrivers();
+      if (isAdmin && activeLocationId === DEFAULT_LOCATION_ID) {
+        const knownPhones = new Set(localDrivers.map((driver) => driver.phone.trim()));
+        localDrivers.push(...loadDrivers(localStorage.getItem(DRIVERS_STORAGE_KEY) || "[]")
+          .filter((driver) => !knownPhones.has(driver.phone.trim())));
+      }
+      const missingDriversByPhone = new Map();
+      let invalidLocalDriverCount = 0;
+      localDrivers.forEach((driver) => {
+        const phoneDigits = driverPhoneDigits(driver.phone);
+        if (!phoneDigits) {
+          invalidLocalDriverCount += 1;
+          return;
+        }
+        if (!knownDrivers.has(phoneDigits) && !missingDriversByPhone.has(phoneDigits)) {
+          missingDriversByPhone.set(phoneDigits, driver);
+        }
+      });
+      const missingDrivers = [...missingDriversByPhone.values()];
+      if (invalidLocalDriverCount) {
+        showToast(`${invalidLocalDriverCount} saved driver${invalidLocalDriverCount === 1 ? " was" : "s were"} skipped because the phone number is invalid.`);
+      }
       if (missingDrivers.length) {
-        const { error } = await supabaseClient.from("drivers").upsert(
+        const { error } = await supabaseClient.from("drivers").insert(
           missingDrivers.map((driver) => ({
-            driver_key: driver.phone.trim(),
+            driver_key: globalDriverKey(driver.phone),
             name: driver.name,
-            phone: driver.phone
-          })),
-          { onConflict: "driver_key" }
+            phone: driver.phone,
+            location_id: null
+          }))
         );
         if (error) throw error;
-        driverData.push(...missingDrivers);
+        driverData.push(...missingDrivers.map((driver) => ({
+          ...driver,
+          driverKey: globalDriverKey(driver.phone)
+        })));
       }
     }
 
     orders = loadOrders(orderData);
     drivers = loadDrivers(driverData);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
-      localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify(drivers));
+      localStorage.setItem(workspaceLocalStorageKey(STORAGE_KEY), JSON.stringify(orders));
+      localStorage.setItem(workspaceLocalStorageKey(DRIVERS_STORAGE_KEY), JSON.stringify(drivers));
     } catch (error) {
       console.warn("Could not keep a local backup of online data.", error);
     }
-    renderSavedDrivers();
-    renderOverview();
-    renderAllOrders();
-    renderHistory();
-    if ($("#catalog-view").classList.contains("active")) renderProductCatalogTable();
-    if ($("#returned-tiles-view").classList.contains("active")) renderReturnedTiles();
-    if ($("#reports-view").classList.contains("active")) renderReports();
-    refreshPreview();
-    setSyncStatus("Online · orders and drivers sync across signed-in devices.");
-    await saveOfflineSnapshot();
+    if (render) {
+      renderLoadedWorkspaceData();
+      setSyncStatus("Online · orders and drivers sync across signed-in devices.");
+    }
+    if (saveSnapshot) await saveOfflineSnapshot();
   }
 
   async function loadDriverCloudData() {
     if (!cloudDriverKey) throw new Error("This driver account has no linked saved driver.");
     const [orderResult, driverResult] = await Promise.all([
-      supabaseClient.from("orders").select("id,data").order("id"),
-      supabaseClient.from("drivers").select("name,phone").eq("phone", cloudDriverKey).maybeSingle()
+      supabaseClient.from("orders").select("id,data,location_id")
+        .eq("location_id", activeLocationId).order("id"),
+      supabaseClient.from("drivers").select("driver_key,name,phone,location_id")
+        .is("location_id", null).eq("phone", cloudDriverKey).maybeSingle()
     ]);
     if (orderResult.error) throw orderResult.error;
     if (driverResult.error) throw driverResult.error;
     if (!driverResult.data) throw new Error("The driver linked to this account is no longer saved in the workspace.");
 
-    orders = loadOrders(orderResult.data.map((row) => row.data));
-    drivers = loadDrivers([{ name: driverResult.data.name, phone: driverResult.data.phone }]);
+    orders = loadOrders(orderResult.data.map((row) => ({
+      ...row.data,
+      locationId: row.location_id || ""
+    })));
+    drivers = loadDrivers([{
+      driverKey: driverResult.data.driver_key,
+      name: driverResult.data.name,
+      phone: driverResult.data.phone
+    }]);
     if (!drivers.length) throw new Error("The linked driver record is invalid.");
     returnedTiles = [];
     returnedTilesSetupError = "";
@@ -2715,6 +3010,132 @@
     select.value = selectedPhone;
   }
 
+  function locationName(locationId) {
+    return WORKSPACE_LOCATION_NAMES.get(locationId) || "Needs location review";
+  }
+
+  function locationIdFromBranch(branch) {
+    const normalized = String(branch || "").trim().toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
+    if (normalized === "200" || normalized.includes("warehouse200")
+      || normalized.includes("wh200") || normalized === "wh2" || normalized.startsWith("wh2")) {
+      return "warehouse-200";
+    }
+    if (normalized === "150" || normalized.includes("warehouse150") || normalized.includes("wh150")) {
+      return "warehouse-150";
+    }
+    return LEGACY_BRANCH_LOCATION_ALIASES.get(normalized) || "";
+  }
+
+  function renderUnassignedOrders() {
+    const panel = $("#unassigned-orders-panel");
+    const body = $("#unassigned-orders");
+    if (!panel || !body) return;
+    const canReview = cloudDeployment && ["owner", "admin"].includes(cloudRole);
+    panel.hidden = !canReview;
+    body.replaceChildren();
+    $("#unassigned-orders-empty").hidden = !canReview || unassignedOrders.length > 0;
+    if (!canReview) return;
+    unassignedOrders.forEach((order) => {
+      const row = document.createElement("tr");
+      [order.id, order.customer || "—", order.branch || "—", order.date || "—"].forEach((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      });
+      const assignmentCell = document.createElement("td");
+      const controls = document.createElement("div");
+      controls.className = "location-review-controls";
+      const select = document.createElement("select");
+      select.setAttribute("aria-label", `Assign order ${order.id} to a location`);
+      select.required = true;
+      select.disabled = offlineReadOnly;
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Choose location";
+      select.append(placeholder);
+      WORKSPACE_LOCATIONS.forEach((location) => {
+        const option = document.createElement("option");
+        option.value = location.id;
+        option.textContent = location.name;
+        option.selected = location.id === locationIdFromBranch(order.branch);
+        select.append(option);
+      });
+      if (!select.value) placeholder.selected = true;
+      const assignButton = document.createElement("button");
+      assignButton.type = "button";
+      assignButton.className = "button button-secondary";
+      assignButton.textContent = "Assign";
+      assignButton.disabled = !select.value;
+      assignButton.hidden = offlineReadOnly;
+      select.addEventListener("change", () => { assignButton.disabled = !select.value; });
+      assignButton.addEventListener("click", () => assignUnassignedOrder(order, select, assignButton));
+      controls.append(select, assignButton);
+      assignmentCell.append(controls);
+      row.append(assignmentCell);
+      body.append(row);
+    });
+    labelTableRows(body);
+  }
+
+  async function assignUnassignedOrder(order, select, button) {
+    const status = $("#unassigned-orders-status");
+    const locationId = select.value;
+    if (!WORKSPACE_LOCATION_NAMES.has(locationId)) {
+      status.textContent = "Choose a valid location.";
+      status.classList.add("error");
+      return;
+    }
+    button.disabled = true;
+    status.classList.remove("error");
+    status.textContent = `Assigning ${order.id}…`;
+    try {
+      const updatedOrder = { ...order, locationId };
+      const { data, error } = await supabaseClient.from("orders")
+        .update({ location_id: locationId, data: updatedOrder, updated_at: new Date().toISOString() })
+        .eq("id", order.id)
+        .is("location_id", null)
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("This order was updated elsewhere. Reload the workspace and try again.");
+      await loadCloudData(false);
+      renderAllOrders();
+      renderUnassignedOrders();
+      status.textContent = `${order.id} assigned to ${locationName(locationId)}.`;
+      showToast(`Order assigned to ${locationName(locationId)}.`);
+    } catch (error) {
+      console.error("Could not assign the order location.", error);
+      status.textContent = error.message || "Could not assign this order.";
+      status.classList.add("error");
+      button.disabled = false;
+    }
+  }
+
+  function renderManagedUserLocationOptions(selectedLocationId = "") {
+    const select = $("#managed-user-location");
+    select.replaceChildren();
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Choose branch / location";
+    select.append(placeholder);
+    WORKSPACE_LOCATIONS.forEach((location) => {
+      const option = document.createElement("option");
+      option.value = location.id;
+      option.textContent = location.name;
+      select.append(option);
+    });
+    select.value = WORKSPACE_LOCATION_NAMES.has(selectedLocationId)
+      ? selectedLocationId
+      : "";
+  }
+
+  function updateManagedUserLocationField() {
+    const role = $("#managed-user-role").value;
+    const requiresLocation = role === "staff" || role === "driver";
+    $("#managed-user-location-field").hidden = !requiresLocation;
+    $("#managed-user-location").required = requiresLocation;
+  }
+
   function resetManagedUserForm() {
     $("#user-form").reset();
     $("#managed-user-id").value = "";
@@ -2730,10 +3151,12 @@
     $("#managed-user-role-field").hidden = cloudRole !== "owner";
     $("#managed-user-role").querySelector('option[value="owner"]').hidden = true;
     $("#managed-user-role").disabled = false;
+    renderManagedUserLocationOptions();
+    updateManagedUserLocationField();
     renderManagedUserDriverOptions();
     $("#managed-user-driver-field").hidden = true;
     $("#managed-user-driver").required = false;
-    $("#user-role-help").textContent = "Admins can create and manage staff. Only the owner can assign driver access; drivers can view only their linked driver's orders.";
+    $("#user-role-help").textContent = "Choose a branch for staff and driver accounts; they can access only that branch. Admin and owner accounts can access all locations.";
     setUsersStatus("");
   }
 
@@ -2747,6 +3170,9 @@
         user.name || "—",
         user.email || "—",
         user.role.charAt(0).toUpperCase() + user.role.slice(1),
+        ["owner", "admin"].includes(user.role)
+          ? "All locations"
+          : user.locationName || locationName(user.locationId),
         user.driverName || user.driverKey || "—",
         user.active ? "Active" : "Inactive",
         formatUserDate(user.lastSignInAt)
@@ -2821,12 +3247,14 @@
     $("#managed-user-role-field").hidden = cloudRole !== "owner";
     $("#managed-user-role").querySelector('option[value="owner"]').hidden = user.role !== "owner";
     $("#managed-user-role").disabled = user.role === "owner";
+    renderManagedUserLocationOptions(user.locationId || "");
+    updateManagedUserLocationField();
     renderManagedUserDriverOptions(user.driverKey || "");
     $("#managed-user-driver-field").hidden = user.role !== "driver";
     $("#managed-user-driver").required = user.role === "driver";
     $("#user-role-help").textContent = user.role === "driver"
-      ? "This account can view only the selected driver's orders in SHAAFICI Drivers."
-      : "Admins can create and manage staff. Only the owner can assign driver access; drivers can view only their linked driver's orders.";
+      ? "This account is limited to the assigned branch and can view only the linked driver's orders."
+      : "Choose a branch for staff accounts; they can access only that branch. Admin and owner accounts can access all locations.";
     $("#managed-user-password-fields").hidden = true;
     $("#managed-user-password").required = false;
     $("#managed-user-password-confirm").required = false;
@@ -2868,12 +3296,18 @@
     const passwordConfirmation = $("#managed-user-password-confirm").value;
     const role = cloudRole === "owner" ? $("#managed-user-role").value : "staff";
     const driverKey = role === "driver" ? $("#managed-user-driver").value : "";
+    const locationId = ["staff", "driver"].includes(role) ? $("#managed-user-location").value : "";
     const payload = {
       name: $("#managed-user-name").value.trim(),
       email: $("#managed-user-email").value.trim(),
       role,
-      driverKey
+      driverKey,
+      locationId
     };
+    if (["staff", "driver"].includes(role) && !WORKSPACE_LOCATION_NAMES.has(locationId)) {
+      setUsersStatus("Choose a location for this user.", true);
+      return;
+    }
     if (role === "driver" && !driverKey) {
       setUsersStatus("Choose a saved driver for this account.", true);
       return;
@@ -2928,8 +3362,9 @@
       format: "shaafici-order-desk-backup",
       version: 2,
       exportedAt: new Date().toISOString(),
+      locationId: activeLocationId,
       orders,
-      drivers,
+      drivers: drivers.map((driver) => ({ ...driver, locationId: null })),
       returnedTiles,
       catalog: currentCatalogData()
     };
@@ -3059,29 +3494,30 @@
       setAuthStatus("Loading your online orders…");
       try {
         const roleResult = await supabaseClient.from("workspace_user_roles")
-          .select("role,driver_key").eq("user_id", user.id).maybeSingle();
-        let driverRoleSchemaMissing = false;
+          .select("role,driver_key,location_id").eq("user_id", user.id).maybeSingle();
         if (roleResult.error) {
-          const missingDriverKey = ["42703", "PGRST204"].includes(roleResult.error.code)
-            && roleResult.error.message.toLocaleLowerCase().includes("driver_key");
-          if (!missingDriverKey) {
-            throw new Error(`Could not load your workspace role: ${roleResult.error.message}`);
+          const missingLocationSchema = ["42703", "PGRST204"].includes(roleResult.error.code)
+            && /driver_key|location_id/i.test(roleResult.error.message);
+          if (missingLocationSchema) {
+            throw new Error("Location access is not configured yet. Ask the workspace owner to run the multi-location Supabase migration.");
           }
-          const legacyRoleResult = await supabaseClient.from("workspace_user_roles")
-            .select("role").eq("user_id", user.id).maybeSingle();
-          if (legacyRoleResult.error) {
-            throw new Error(`Could not load your workspace role: ${legacyRoleResult.error.message}`);
+          throw new Error(`Could not load your workspace role: ${roleResult.error.message}`);
+        }
+        if (!roleResult.data?.role) throw new Error("Your workspace account has no assigned role. Ask an owner or admin to configure it.");
+        cloudRole = roleResult.data.role;
+        cloudDriverKey = cloudRole === "driver" ? roleResult.data.driver_key || "" : "";
+        cloudLocationId = roleResult.data.location_id || "";
+        if (["staff", "driver"].includes(cloudRole)) {
+          if (!WORKSPACE_LOCATION_NAMES.has(cloudLocationId)) {
+            throw new Error("Your account has no valid assigned location. Ask an owner or admin to assign one.");
           }
-          cloudRole = legacyRoleResult.data?.role || "staff";
-          cloudDriverKey = "";
-          driverRoleSchemaMissing = true;
+          activeLocationId = cloudLocationId;
+        } else if (["owner", "admin"].includes(cloudRole)) {
+          if (!WORKSPACE_LOCATION_NAMES.has(activeLocationId)) activeLocationId = DEFAULT_LOCATION_ID;
         } else {
-          cloudRole = roleResult.data?.role || "staff";
-          cloudDriverKey = cloudRole === "driver" ? roleResult.data?.driver_key || "" : "";
+          throw new Error("Your workspace account has an unsupported role.");
         }
-        if (driverRoleSchemaMissing && cloudRole === "driver") {
-          throw new Error("Driver accounts require the updated Supabase schema. Ask the workspace owner to run supabase-schema.sql.");
-        }
+        localStorage.setItem(ACTIVE_LOCATION_KEY, activeLocationId);
         if (cloudRole === "driver" && !cloudDriverKey) {
           throw new Error("This driver account is not linked to a saved driver. Ask the workspace owner to link it.");
         }
@@ -3097,13 +3533,15 @@
         renderLoadedApp();
         subscribeToCloudChanges();
         await saveOfflineSnapshot();
-        if (driverRoleSchemaMissing && ["owner", "admin"].includes(cloudRole)) {
-          setSyncStatus("Driver accounts are unavailable until the updated Supabase schema is applied.", true);
-        }
       } catch (error) {
         cloudUser = null;
         cloudRole = "staff";
         cloudDriverKey = "";
+        cloudLocationId = "";
+        unassignedOrders = [];
+        cloudLocationId = "";
+        unassignedOrders = [];
+        unassignedOrders = [];
         orders = [];
         drivers = [];
         returnedTiles = [];
@@ -3230,7 +3668,9 @@
   let toastTimer;
   function loadOrders(savedValue) {
     try {
-      const source = savedValue === undefined ? localStorage.getItem(STORAGE_KEY) || "[]" : savedValue;
+      const source = savedValue === undefined
+        ? localStorage.getItem(workspaceLocalStorageKey(STORAGE_KEY)) || "[]"
+        : savedValue;
       const saved = typeof source === "string" ? JSON.parse(source) : source;
       if (!Array.isArray(saved)) throw new Error("Saved order data is not a list.");
       needsMoneyDataCleanup = saved.some((order) =>
@@ -3243,6 +3683,7 @@
           : [{ timestamp: createdAt, action: "Order created", details: "Order recorded." }];
         return {
           id: order.id,
+          locationId: WORKSPACE_LOCATION_NAMES.has(order.locationId) ? order.locationId : "",
           customer: order.customer || "",
           branch: order.branch || "",
           category: order.category || categories[0],
@@ -3338,7 +3779,16 @@
       }
       const savedOrders = changedOrder ? [changedOrder] : orders;
       const { error } = await supabaseClient.from("orders").upsert(
-        savedOrders.map((order) => ({ id: order.id, data: order })),
+        savedOrders.map((order) => {
+          const locationId = WORKSPACE_LOCATION_NAMES.has(order.locationId)
+            ? order.locationId
+            : activeLocationId;
+          return {
+            id: order.id,
+            location_id: locationId,
+            data: { ...order, locationId }
+          };
+        }),
         { onConflict: "id" }
       );
       if (error) {
@@ -3347,7 +3797,7 @@
         return false;
       }
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
+        localStorage.setItem(workspaceLocalStorageKey(STORAGE_KEY), JSON.stringify(orders));
       } catch (error) {
         console.warn("Could not keep a local order backup.", error);
       }
@@ -3355,7 +3805,7 @@
       return true;
     }
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
+      localStorage.setItem(workspaceLocalStorageKey(STORAGE_KEY), JSON.stringify(orders));
     } catch (error) {
       console.error("Could not save orders in this browser.", error);
       showToast("Could not save. Check this browser's storage settings.");
@@ -3366,13 +3816,19 @@
 
   function loadDrivers(savedValue) {
     try {
-      const source = savedValue === undefined ? localStorage.getItem(DRIVERS_STORAGE_KEY) || "[]" : savedValue;
+      const source = savedValue === undefined
+        ? localStorage.getItem(workspaceLocalStorageKey(DRIVERS_STORAGE_KEY)) || "[]"
+        : savedValue;
       const saved = typeof source === "string" ? JSON.parse(source) : source;
       if (!Array.isArray(saved)) throw new Error("Saved driver data is not a list.");
       return saved.filter((driver) =>
         driver && typeof driver.name === "string" && typeof driver.phone === "string"
         && driver.name.trim() && driver.phone.trim()
-      ).map((driver) => ({ name: driver.name.trim(), phone: driver.phone.trim() }));
+      ).map((driver) => ({
+        driverKey: typeof driver.driverKey === "string" ? driver.driverKey : "",
+        name: driver.name.trim(),
+        phone: driver.phone.trim()
+      }));
     } catch (error) {
       console.error("Could not load saved drivers.", error);
       showToast("Could not load saved drivers from this browser.");
@@ -3380,7 +3836,15 @@
     }
   }
 
-  async function persistDrivers() {
+  function driverPhoneDigits(phone) {
+    return phone.replace(/\D/g, "");
+  }
+
+  function globalDriverKey(phone) {
+    return `global:${driverPhoneDigits(phone)}`;
+  }
+
+  async function persistDrivers(driver) {
     if (offlineReadOnly) {
       showToast("Offline access is read-only. Reconnect and reload before making changes.");
       return false;
@@ -3390,21 +3854,19 @@
         showToast("Sign in before saving drivers online.");
         return false;
       }
-      const { error } = await supabaseClient.from("drivers").upsert(
-        drivers.map((driver) => ({
-          driver_key: driver.name.trim().toLocaleLowerCase(),
-          name: driver.name,
-          phone: driver.phone
-        })),
-        { onConflict: "driver_key" }
-      );
+      const { error } = await supabaseClient.from("drivers").insert({
+        driver_key: globalDriverKey(driver.phone),
+        name: driver.name,
+        phone: driver.phone,
+        location_id: null
+      });
       if (error) {
         console.error("Could not save drivers online.", error);
         showToast(`Could not save driver online: ${error.message}`);
         return false;
       }
       try {
-        localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify(drivers));
+        localStorage.setItem(workspaceLocalStorageKey(DRIVERS_STORAGE_KEY), JSON.stringify(drivers));
       } catch (error) {
         console.warn("Could not keep a local driver backup.", error);
       }
@@ -3412,7 +3874,7 @@
       return true;
     }
     try {
-      localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify(drivers));
+      localStorage.setItem(workspaceLocalStorageKey(DRIVERS_STORAGE_KEY), JSON.stringify(drivers));
     } catch (error) {
       console.error("Could not save drivers in this browser.", error);
       showToast("Could not save the driver. Check this browser's storage settings.");
@@ -3421,8 +3883,104 @@
     return true;
   }
 
+  function canManageSharedDrivers() {
+    return cloudDeployment && cloudRole === "owner" && !offlineReadOnly;
+  }
+
+  function driverAccounts(driver) {
+    const phoneDigits = driverPhoneDigits(driver.phone);
+    return workspaceUsers.filter((user) =>
+      user.role === "driver" && driverPhoneDigits(user.driverKey || "") === phoneDigits
+    );
+  }
+
+  function cacheDriverDirectory() {
+    try {
+      localStorage.setItem(workspaceLocalStorageKey(DRIVERS_STORAGE_KEY), JSON.stringify(drivers));
+    } catch (error) {
+      console.warn("Could not keep a local driver backup.", error);
+    }
+    void saveOfflineSnapshot();
+  }
+
+  async function updateSavedDriver(originalDriver, name, phone) {
+    if (!canManageSharedDrivers()) return false;
+    if (!name || name.length > 80 || !phone || !driverPhoneDigits(phone)) {
+      showToast("Enter a driver name and a valid phone number.");
+      return false;
+    }
+    const phoneDigits = driverPhoneDigits(phone);
+    if (drivers.some((driver) => driver.driverKey !== originalDriver.driverKey
+      && driverPhoneDigits(driver.phone) === phoneDigits)) {
+      showToast("This phone number is already registered to another driver.");
+      return false;
+    }
+    const linkedAccounts = driverAccounts(originalDriver);
+    if (phone !== originalDriver.phone && linkedAccounts.length
+      && !window.confirm(`Changing this phone number will disconnect ${linkedAccounts.length} linked Driver account${linkedAccounts.length === 1 ? "" : "s"} until you update their saved-driver assignment. Existing orders will keep their saved details. Continue?`)) {
+      return false;
+    }
+    const nextDriver = {
+      ...originalDriver,
+      driverKey: globalDriverKey(phone),
+      name,
+      phone
+    };
+    try {
+      const { data, error } = await supabaseClient.from("drivers")
+        .update({
+          driver_key: nextDriver.driverKey,
+          name: nextDriver.name,
+          phone: nextDriver.phone
+        })
+        .eq("driver_key", originalDriver.driverKey)
+        .select("driver_key")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("The driver was not found. Refresh the list and try again.");
+      drivers = drivers.map((driver) =>
+        driver.driverKey === originalDriver.driverKey ? nextDriver : driver
+      );
+      renderSavedDrivers();
+      cacheDriverDirectory();
+      showToast("Driver details updated for all branches.");
+      return true;
+    } catch (error) {
+      console.error("Could not update the shared driver.", error);
+      showToast(`Could not update driver: ${error.message}`);
+      return false;
+    }
+  }
+
+  async function deleteSavedDriver(driver) {
+    if (!canManageSharedDrivers()) return;
+    const linkedAccounts = driverAccounts(driver);
+    const warning = linkedAccounts.length
+      ? ` ${linkedAccounts.length} linked Driver account${linkedAccounts.length === 1 ? "" : "s"} will lose access until reassigned.`
+      : "";
+    if (!window.confirm(`Delete ${driver.name} (${driver.phone}) from the shared driver list? Existing orders will keep their saved details.${warning}`)) return;
+    try {
+      const { data, error } = await supabaseClient.from("drivers")
+        .delete()
+        .eq("driver_key", driver.driverKey)
+        .select("driver_key")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("The driver was not found. Refresh the list and try again.");
+      drivers = drivers.filter((entry) => entry.driverKey !== driver.driverKey);
+      renderSavedDrivers();
+      cacheDriverDirectory();
+      showToast("Driver deleted from all branches.");
+    } catch (error) {
+      console.error("Could not delete the shared driver.", error);
+      showToast(`Could not delete driver: ${error.message}`);
+    }
+  }
+
   function renderDriverDirectory() {
     const list = $("#drivers-directory-list");
+    const canEdit = canManageSharedDrivers();
+    $("#drivers-directory-actions-header").hidden = !canEdit;
     const query = $("#drivers-directory-search").value.trim().toLocaleLowerCase();
     const matchingDrivers = drivers.filter((driver) =>
       `${driver.name} ${driver.phone}`.toLocaleLowerCase().includes(query)
@@ -3432,9 +3990,53 @@
       const row = document.createElement("tr");
       const nameCell = document.createElement("td");
       const phoneCell = document.createElement("td");
+      const actionsCell = document.createElement("td");
       nameCell.textContent = driver.name;
       phoneCell.textContent = driver.phone;
+      if (canEdit) {
+        actionsCell.className = "user-row-actions";
+        const editButton = document.createElement("button");
+        editButton.type = "button";
+        editButton.className = "button button-secondary";
+        editButton.textContent = "Edit";
+        editButton.addEventListener("click", () => {
+          const nameInput = document.createElement("input");
+          nameInput.type = "text";
+          nameInput.maxLength = 80;
+          nameInput.value = driver.name;
+          nameInput.setAttribute("aria-label", `Edit ${driver.name} name`);
+          const phoneInput = document.createElement("input");
+          phoneInput.type = "tel";
+          phoneInput.maxLength = 30;
+          phoneInput.value = driver.phone;
+          phoneInput.setAttribute("aria-label", `Edit ${driver.name} phone number`);
+          nameCell.replaceChildren(nameInput);
+          phoneCell.replaceChildren(phoneInput);
+          const saveButton = document.createElement("button");
+          saveButton.type = "button";
+          saveButton.className = "button button-primary";
+          saveButton.textContent = "Save";
+          saveButton.addEventListener("click", async () => {
+            saveButton.disabled = true;
+            const saved = await updateSavedDriver(driver, nameInput.value.trim(), phoneInput.value.trim());
+            if (!saved) renderDriverDirectory();
+          });
+          const cancelButton = document.createElement("button");
+          cancelButton.type = "button";
+          cancelButton.className = "button button-secondary";
+          cancelButton.textContent = "Cancel";
+          cancelButton.addEventListener("click", renderDriverDirectory);
+          actionsCell.replaceChildren(saveButton, cancelButton);
+        });
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "button button-secondary";
+        deleteButton.textContent = "Delete";
+        deleteButton.addEventListener("click", () => deleteSavedDriver(driver));
+        actionsCell.append(editButton, deleteButton);
+      }
       row.append(nameCell, phoneCell);
+      if (canEdit) row.append(actionsCell);
       list.append(row);
     });
     labelTableRows(list);
@@ -3821,7 +4423,7 @@
     updatedOrders[orderIndex] = result.order;
     orders = loadOrders(updatedOrders);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
+      localStorage.setItem(workspaceLocalStorageKey(STORAGE_KEY), JSON.stringify(orders));
     } catch (error) {
       console.warn("Could not keep a local backup of the driver transfer update.", error);
     }
@@ -3960,19 +4562,25 @@
     }
     const name = nameInput.value.trim();
     const phone = phoneInput.value.trim();
-    if (!name || !phone) {
-      showToast("Enter both a driver name and phone number.");
+    if (!name || !phone || !driverPhoneDigits(phone)) {
+      showToast("Enter a driver name and a valid phone number.");
       return;
     }
 
-    const phoneAlreadyRegistered = drivers.some((driver) => driver.phone.trim() === phone);
+    const phoneAlreadyRegistered = drivers.some((driver) =>
+      driverPhoneDigits(driver.phone) === driverPhoneDigits(phone)
+    );
     if (phoneAlreadyRegistered) {
       showToast("This driver is already registered.");
       return;
     }
     const previousDrivers = drivers;
-    drivers = [...drivers, { name, phone }];
-    if (!await persistDrivers()) {
+    drivers = [...drivers, {
+      driverKey: globalDriverKey(phone),
+      name,
+      phone
+    }];
+    if (!await persistDrivers(drivers[drivers.length - 1])) {
       drivers = previousDrivers;
       renderSavedDrivers();
       return;
@@ -3986,7 +4594,7 @@
       $("#driver-phone").value = phone;
       refreshPreview();
     }
-    showToast("Driver saved for future orders.");
+    showToast("Driver saved for all branches.");
   }
 
   function dateValue(date = new Date()) {
@@ -5805,6 +6413,7 @@
     const previousOrder = orders.find((order) => order.id === editingId);
     return {
       id: editingId || nextOrderId(),
+      locationId: previousOrder?.locationId || activeLocationId,
       customer: data.get("customer").trim(),
       branch: data.get("branch").trim(),
       category: data.get("category"),
@@ -6168,7 +6777,7 @@
         ? { action: "decide-order", orderId: request.id, decision }
         : request.type === "Delivery confirmation"
           ? { action: "decide-delivery", orderId: request.id, decision }
-          : { action: "decide-adjustment", requestId: request.id, decision };
+          : { action: "decide-adjustment", requestId: request.id, decision, locationId: activeLocationId };
       await invokeWorkflowManagement(body);
       await loadCloudData(false);
       renderProductCatalogOptions();
@@ -7359,6 +7968,7 @@
     $("#managed-user-driver-field").hidden = !isDriver;
     $("#managed-user-driver").required = isDriver;
     if (!isDriver) $("#managed-user-driver").value = "";
+    updateManagedUserLocationField();
   });
   $$("[data-category]").forEach((button) => button.addEventListener("click", () => {
     if (button.dataset.category === "Converter" && $("#new-order-view").classList.contains("active")) {
@@ -7707,7 +8317,75 @@
     event.returnValue = "";
   });
 
+  function renderWorkspaceLocation() {
+    const canSwitchLocation = cloudDeployment && ["owner", "admin"].includes(cloudRole)
+      && !offlineReadOnly;
+    const switcher = $("#workspace-location-switcher");
+    const locationLabel = $("#workspace-location-name");
+    const select = $("#workspace-location-select");
+    switcher.hidden = !canSwitchLocation;
+    locationLabel.hidden = !cloudDeployment || canSwitchLocation;
+    locationLabel.textContent = cloudDeployment ? locationName(activeLocationId) : "";
+    if (canSwitchLocation) {
+      select.replaceChildren(...WORKSPACE_LOCATIONS.map((location) => {
+        const option = document.createElement("option");
+        option.value = location.id;
+        option.textContent = location.name;
+        return option;
+      }));
+      select.value = activeLocationId;
+    }
+    $("#catalog-location-description").textContent =
+      `Inventory and Excel imports for ${locationName(activeLocationId)}.`;
+    $("#upload-workbook").textContent = `Upload ${locationName(activeLocationId)} Excel`;
+  }
+
+  async function switchWorkspaceLocation(locationId) {
+    if (!["owner", "admin"].includes(cloudRole)
+      || !WORKSPACE_LOCATION_NAMES.has(locationId)
+      || locationId === activeLocationId) return;
+    if (hasUnsavedOrderChanges() && !confirmDiscardUnsavedOrder()) {
+      $("#workspace-location-select").value = activeLocationId;
+      return;
+    }
+    const previousLocationId = activeLocationId;
+    $("#workspace-location-select").disabled = true;
+    activeLocationId = locationId;
+    localStorage.setItem(ACTIVE_LOCATION_KEY, activeLocationId);
+    setSyncStatus(`Loading ${locationName(activeLocationId)}…`);
+    try {
+      await loadCloudData(false, { render: false, saveSnapshot: false });
+      await applyYesterdayOrderTransfers();
+      renderWorkspaceLocation();
+      renderLoadedWorkspaceData();
+      setSyncStatus(`Online · showing ${locationName(activeLocationId)} data.`);
+      void saveOfflineSnapshot();
+    } catch (error) {
+      console.error(`Could not load ${locationName(locationId)} data.`, error);
+      activeLocationId = previousLocationId;
+      localStorage.setItem(ACTIVE_LOCATION_KEY, activeLocationId);
+      $("#workspace-location-select").value = activeLocationId;
+      try {
+        await loadCloudData(false, { render: false, saveSnapshot: false });
+        renderWorkspaceLocation();
+        renderLoadedWorkspaceData();
+        void saveOfflineSnapshot();
+      } catch (restoreError) {
+        console.error(`Could not restore ${locationName(previousLocationId)} data.`, restoreError);
+      }
+      setSyncStatus(`Could not switch locations — ${error.message}`, true);
+    } finally {
+      $("#workspace-location-select").disabled = false;
+    }
+  }
+
+  $("#workspace-location-select").addEventListener("change", (event) => {
+    switchWorkspaceLocation(event.currentTarget.value);
+  });
+
   function renderLoadedApp() {
+    renderWorkspaceLocation();
+    renderUnassignedOrders();
     const isDriver = cloudDeployment && cloudRole === "driver";
     $("#app-shell").hidden = false;
     $("#app-shell").classList.toggle("offline-read-only", offlineReadOnly);

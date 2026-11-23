@@ -23,6 +23,24 @@ create table if not exists public.workspace_catalog (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.workspace_locations (
+  id text primary key,
+  name text not null unique,
+  sort_order integer not null default 0
+);
+
+insert into public.workspace_locations (id, name, sort_order) values
+  ('warehouse-200', 'Warehouse 200', 10),
+  ('warehouse-150', 'Warehouse 150', 20),
+  ('main-branch-store', 'Main Branch Store', 30),
+  ('jjr-store', 'JJR Store', 40),
+  ('idc-store', 'IDC Store', 50),
+  ('nh-store', 'NH Store', 60),
+  ('dum-store', 'Dum Store', 70),
+  ('borama-store', 'Borama Store', 80),
+  ('elec-store', 'ELEC Store', 90)
+on conflict (id) do update set name = excluded.name, sort_order = excluded.sort_order;
+
 create table if not exists public.workspace_user_roles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   role text not null check (role in ('owner', 'admin', 'staff', 'driver')) default 'staff',
@@ -32,6 +50,42 @@ create table if not exists public.workspace_user_roles (
 
 alter table public.workspace_user_roles
   add column if not exists driver_key text;
+alter table public.workspace_user_roles
+  add column if not exists location_id text references public.workspace_locations(id);
+
+alter table public.orders
+  add column if not exists location_id text references public.workspace_locations(id);
+alter table public.drivers
+  add column if not exists location_id text references public.workspace_locations(id);
+alter table public.returned_tile_records
+  add column if not exists location_id text references public.workspace_locations(id);
+alter table public.workspace_catalog
+  add column if not exists location_id text references public.workspace_locations(id);
+
+alter table public.workspace_catalog
+  alter column location_id set default 'warehouse-200';
+update public.workspace_catalog
+set location_id = 'warehouse-200'
+where location_id is null;
+alter table public.workspace_catalog
+  alter column location_id set not null;
+
+do $$
+declare
+  catalog_primary text;
+begin
+  select conname into catalog_primary
+  from pg_constraint
+  where conrelid = 'public.workspace_catalog'::regclass
+    and contype = 'p';
+  if catalog_primary is not null then
+    execute format('alter table public.workspace_catalog drop constraint %I', catalog_primary);
+  end;
+end
+$$;
+drop index if exists public.workspace_catalog_location_key;
+alter table public.workspace_catalog
+  add constraint workspace_catalog_pkey primary key (location_id, catalog_key);
 
 alter table public.workspace_user_roles
   drop constraint if exists workspace_user_roles_role_check;
@@ -44,6 +98,50 @@ update public.workspace_user_roles
 set driver_key = null
 where role <> 'driver'
   and driver_key is not null;
+
+update public.workspace_user_roles
+set location_id = null
+where role in ('owner', 'admin');
+
+update public.workspace_user_roles
+set location_id = 'warehouse-200'
+where role in ('staff', 'driver')
+  and location_id is null;
+
+alter table public.workspace_user_roles
+  drop constraint if exists workspace_user_roles_location_check;
+
+alter table public.workspace_user_roles
+  add constraint workspace_user_roles_location_check
+  check (
+    (role in ('staff', 'driver') and location_id is not null)
+    or (role in ('owner', 'admin') and location_id is null)
+  );
+
+with ranked_drivers as (
+  select driver_key,
+    regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') as phone_digits,
+    row_number() over (
+      partition by regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g')
+      order by updated_at desc, driver_key
+    ) as duplicate_rank
+  from public.drivers
+)
+delete from public.drivers driver
+using ranked_drivers ranked
+where driver.driver_key = ranked.driver_key
+  and ranked.phone_digits <> ''
+  and ranked.duplicate_rank > 1;
+
+alter table public.drivers alter column location_id drop not null;
+update public.drivers
+set driver_key = 'global:' || regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'),
+    location_id = null
+where regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') <> '';
+update public.drivers set location_id = null where location_id is not null;
+create unique index if not exists drivers_phone_global_unique
+  on public.drivers (regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'))
+  where regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') <> '';
 
 alter table public.workspace_user_roles
   drop constraint if exists workspace_user_roles_driver_link_check;
@@ -58,6 +156,40 @@ alter table public.workspace_user_roles
 create unique index if not exists workspace_user_roles_single_owner
   on public.workspace_user_roles (role)
   where role = 'owner';
+
+create or replace function public.location_id_from_branch(value text)
+returns text
+language sql
+immutable
+strict
+as $$
+  with normalized as (
+    select lower(regexp_replace(coalesce(value, ''), '[^a-z0-9]+', '', 'g')) as v
+  )
+  select case
+    when v = '200' or v like '%warehouse200%' or v like '%wh200%' or v = 'wh2' or v like 'wh2%' then 'warehouse-200'
+    when v = '150' or v like '%warehouse150%' or v like '%wh150%' then 'warehouse-150'
+    when v in ('mainbranchstore', 'mainbranch', 'mainstore', 'mbs') then 'main-branch-store'
+    when v in ('jjrstore', 'jjr') then 'jjr-store'
+    when v in ('idcstore', 'idc') then 'idc-store'
+    when v in ('nhstore', 'nh') then 'nh-store'
+    when v in ('dumstore', 'dum') then 'dum-store'
+    when v in ('boramastore', 'borama') then 'borama-store'
+    when v in ('elecstore', 'elec') then 'elec-store'
+    else null
+  end
+  from normalized
+$$;
+
+update public.orders
+set location_id = public.location_id_from_branch(coalesce(data->>'branch', data->>'location', data->>'fromBranch', data->>'warehouse'))
+where location_id is null;
+
+update public.returned_tile_records
+set location_id = public.location_id_from_branch(
+  coalesce(data->>'branch', data->>'location', data->>'fromLocation')
+)
+where location_id is null;
 
 alter table public.orders enable row level security;
 alter table public.drivers enable row level security;
@@ -90,10 +222,42 @@ as $$
     and role = 'driver'
 $$;
 
+create or replace function public.current_workspace_location_id()
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select location_id
+  from public.workspace_user_roles
+  where user_id = auth.uid()
+$$;
+
+create or replace function public.can_access_workspace_location(target_location_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select case
+    when public.current_workspace_role() in ('owner', 'admin') then true
+    when public.current_workspace_role() in ('staff', 'driver')
+      then public.current_workspace_location_id() is not null
+        and public.current_workspace_location_id() = target_location_id
+    else false
+  end
+$$;
+
 revoke all on function public.current_workspace_role() from public, anon, authenticated;
 revoke all on function public.current_workspace_driver_key() from public, anon, authenticated;
+revoke all on function public.current_workspace_location_id() from public, anon, authenticated;
+revoke all on function public.can_access_workspace_location(text) from public, anon, authenticated;
 grant execute on function public.current_workspace_role() to authenticated;
 grant execute on function public.current_workspace_driver_key() to authenticated;
+grant execute on function public.current_workspace_location_id() to authenticated;
+grant execute on function public.can_access_workspace_location(text) to authenticated;
 
 drop policy if exists "Authenticated workspace access" on public.orders;
 drop policy if exists "Workspace staff can manage orders" on public.orders;
@@ -102,8 +266,20 @@ create policy "Workspace staff can manage orders"
   on public.orders
   for all
   to authenticated
-  using (public.current_workspace_role() in ('owner', 'admin', 'staff'))
-  with check (public.current_workspace_role() in ('owner', 'admin', 'staff'));
+  using (
+    public.current_workspace_role() in ('owner', 'admin')
+    or (
+      public.current_workspace_role() = 'staff'
+      and public.can_access_workspace_location(location_id)
+    )
+  )
+  with check (
+    public.current_workspace_role() in ('owner', 'admin')
+    or (
+      public.current_workspace_role() = 'staff'
+      and public.can_access_workspace_location(location_id)
+    )
+  );
 
 create policy "Drivers can read assigned orders"
   on public.orders
@@ -112,6 +288,7 @@ create policy "Drivers can read assigned orders"
   using (
     public.current_workspace_role() = 'driver'
     and public.current_workspace_driver_key() is not null
+    and public.can_access_workspace_location(location_id)
     and exists (
       select 1
       from public.drivers linked_driver
@@ -134,12 +311,35 @@ create policy "Drivers can read assigned orders"
 drop policy if exists "Authenticated workspace access" on public.drivers;
 drop policy if exists "Workspace staff can manage drivers" on public.drivers;
 drop policy if exists "Drivers can read their linked driver record" on public.drivers;
-create policy "Workspace staff can manage drivers"
+drop policy if exists "Workspace users can read shared drivers" on public.drivers;
+drop policy if exists "Workspace staff can add shared drivers" on public.drivers;
+drop policy if exists "Workspace owner can update shared drivers" on public.drivers;
+drop policy if exists "Workspace owner can delete shared drivers" on public.drivers;
+create policy "Workspace users can read shared drivers"
   on public.drivers
-  for all
+  for select
   to authenticated
-  using (public.current_workspace_role() in ('owner', 'admin', 'staff'))
-  with check (public.current_workspace_role() in ('owner', 'admin', 'staff'));
+  using (
+    public.current_workspace_role() in ('owner', 'admin', 'staff')
+  );
+create policy "Workspace staff can add shared drivers"
+  on public.drivers
+  for insert
+  to authenticated
+  with check (
+    public.current_workspace_role() in ('owner', 'admin', 'staff')
+  );
+create policy "Workspace owner can update shared drivers"
+  on public.drivers
+  for update
+  to authenticated
+  using (public.current_workspace_role() = 'owner')
+  with check (public.current_workspace_role() = 'owner');
+create policy "Workspace owner can delete shared drivers"
+  on public.drivers
+  for delete
+  to authenticated
+  using (public.current_workspace_role() = 'owner');
 
 create policy "Drivers can read their linked driver record"
   on public.drivers
@@ -159,8 +359,20 @@ create policy "Workspace staff can manage returned tiles"
   on public.returned_tile_records
   for all
   to authenticated
-  using (public.current_workspace_role() in ('owner', 'admin', 'staff'))
-  with check (public.current_workspace_role() in ('owner', 'admin', 'staff'));
+  using (
+    public.current_workspace_role() in ('owner', 'admin')
+    or (
+      public.current_workspace_role() = 'staff'
+      and public.can_access_workspace_location(location_id)
+    )
+  )
+  with check (
+    public.current_workspace_role() in ('owner', 'admin')
+    or (
+      public.current_workspace_role() = 'staff'
+      and public.can_access_workspace_location(location_id)
+    )
+  );
 
 drop policy if exists "Authenticated workspace access" on public.workspace_catalog;
 drop policy if exists "Workspace staff can manage the catalog" on public.workspace_catalog;
@@ -168,14 +380,34 @@ create policy "Workspace staff can manage the catalog"
   on public.workspace_catalog
   for all
   to authenticated
-  using (public.current_workspace_role() in ('owner', 'admin', 'staff'))
-  with check (public.current_workspace_role() in ('owner', 'admin', 'staff'));
+  using (
+    public.current_workspace_role() in ('owner', 'admin')
+    or (
+      public.current_workspace_role() = 'staff'
+      and public.can_access_workspace_location(location_id)
+    )
+  )
+  with check (
+    public.current_workspace_role() in ('owner', 'admin')
+    or (
+      public.current_workspace_role() = 'staff'
+      and public.can_access_workspace_location(location_id)
+    )
+  );
 
 grant select, insert, update, delete on public.orders to authenticated;
 grant select, insert, update, delete on public.drivers to authenticated;
 grant select, insert, update, delete on public.returned_tile_records to authenticated;
 grant select, insert, update, delete on public.workspace_catalog to authenticated;
 grant select on public.workspace_user_roles to authenticated;
+alter table public.workspace_locations enable row level security;
+grant select on public.workspace_locations to authenticated;
+drop policy if exists "Authenticated users can read locations" on public.workspace_locations;
+create policy "Authenticated users can read locations"
+  on public.workspace_locations
+  for select
+  to authenticated
+  using (public.current_workspace_role() in ('owner', 'admin', 'staff', 'driver'));
 
 create or replace function public.is_workspace_approval_admin()
 returns boolean
@@ -395,6 +627,7 @@ where lower(email) = 'engahmedgurey@gmail.com'
 on conflict (user_id) do update
 set role = 'owner',
     driver_key = null,
+    location_id = null,
     updated_at = now();
 
 do $$

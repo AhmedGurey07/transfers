@@ -3685,10 +3685,16 @@
 
   function nativeAppUpdater() {
     if (appUpdater) return appUpdater;
-    if (typeof window.Capacitor?.registerPlugin !== "function") {
+    const capacitor = window.Capacitor;
+    const registeredPlugin = capacitor?.Plugins?.AppUpdater;
+    if (registeredPlugin) {
+      appUpdater = registeredPlugin;
+      return appUpdater;
+    }
+    if (typeof capacitor?.registerPlugin !== "function") {
       throw new Error("The app update service is unavailable. Reinstall the latest app and try again.");
     }
-    appUpdater = window.Capacitor.registerPlugin("AppUpdater");
+    appUpdater = capacitor.registerPlugin("AppUpdater");
     return appUpdater;
   }
 

@@ -2374,10 +2374,39 @@ form .auth-field input::placeholder {
     max-height: 65vh;
     overflow-y: auto !important;
   }
+  #catalog-view .table-view-container[data-table-view="cards"] .table-scroll {
+    max-height: none;
+  }
   .table-view-container[data-table-view="cards"] .table-pagination {
     margin-top: 8px;
   }
-  .catalog-results-footer .catalog-page-controls { margin-left: 0; }
+  #catalog-view .catalog-results-footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  #catalog-view .catalog-results-footer > #catalog-results-status {
+    min-width: 0;
+    text-align: center;
+  }
+  #catalog-view .catalog-results-footer .catalog-page-controls {
+    width: 100%;
+    min-width: 0;
+    justify-content: space-between;
+    gap: 6px;
+    margin-left: 0;
+  }
+  #catalog-view .catalog-page-controls .table-pagination-arrow {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+  }
+  #catalog-view .catalog-page-controls .table-pagination-status {
+    min-width: 0;
+    flex: 1 1 auto;
+    white-space: nowrap;
+    font-size: 11px;
+  }
 }
 
 @media screen {

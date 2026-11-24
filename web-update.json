@@ -1,0 +1,116 @@
+{
+  "version": 2,
+  "baseUrl": "https://ahmedgurey07.github.io/transfers/web-updates/v2/",
+  "files": [
+    {
+      "path": "app.js",
+      "sha256": "ee5123ce747a2a6c5e2881d7a114d0dd3ea233aea2f542baf41ab547cb66a28e",
+      "size": 408404
+    },
+    {
+      "path": "index.html",
+      "sha256": "16f3c22d9e8d8aae9ebce2e3b2d2741becf319a94ca21ddb3cc706110365b174",
+      "size": 73377
+    },
+    {
+      "path": "manifest.webmanifest",
+      "sha256": "173adfdc80b2f8ff79efa297490b2c50709d81427b63c0b02ee0801bc33ee10c",
+      "size": 434
+    },
+    {
+      "path": "products.js",
+      "sha256": "9f5f29b20906fc8396d89eecbfdcbc261ee16f19d12c341b659a87f31590df4e",
+      "size": 179369
+    },
+    {
+      "path": "service-worker.js",
+      "sha256": "822ef10200ecfe9d75ab1fac0a4757bfa5bc1830b9113e21241f57e709e423c9",
+      "size": 3088
+    },
+    {
+      "path": "shaafici-app-icon.png",
+      "sha256": "2d0afd40f9d3f17224ece6c30a3ef8d84fc19199db21ff0e15c0d97a6d33c217",
+      "size": 178859
+    },
+    {
+      "path": "shaafici-logo.jpg",
+      "sha256": "8db3d0e3a452d1811f750e730ee276e3ac15abdb8c7815cf98977bc93a05b834",
+      "size": 7519
+    },
+    {
+      "path": "shaafici-logo.png",
+      "sha256": "ab0c191774a1b9f9eed6d864d83df05c0d0a364e5d57eda22b4220db390aac8e",
+      "size": 34131
+    },
+    {
+      "path": "shaafici-shortcut-logo.ico",
+      "sha256": "9f0fbe6ee5ac1c8fded239ee1c355571007f174f11dd555982911cccc8f27af3",
+      "size": 42929
+    },
+    {
+      "path": "shaafici-shortcut-logo.png",
+      "sha256": "c80db504308a594b3d50dbb4d880f90ceeb35817a01a9c3263a22ab88ce91ea1",
+      "size": 42907
+    },
+    {
+      "path": "shaafici-warehouse-200-logo-dark.png",
+      "sha256": "2023dc9c81f1fdc6c372ebde11836e267e92626e63c94c8726adaa2c79146507",
+      "size": 5104
+    },
+    {
+      "path": "shaafici-warehouse-200-logo.ico",
+      "sha256": "c7862268c5e8be1b95fd251cfee341dd47e9e3085be57c59238f53aa8dd29101",
+      "size": 6529
+    },
+    {
+      "path": "shaafici-warehouse-200-logo.png",
+      "sha256": "02b44e3d0491bdc8c41fbd15663d3082dc8a7be7c9895b47a9e5e88c01ddb465",
+      "size": 6507
+    },
+    {
+      "path": "shaafici-wordmark-dark.png",
+      "sha256": "639afea824eced6f0b437239774a248d9420203929c6e1b5f6539edad71dc161",
+      "size": 2926
+    },
+    {
+      "path": "shaafici-wordmark-light.png",
+      "sha256": "e7a7ce7fd419055b1a2ee89d1bac91410bcbda616b6e2e51edf660b625b182d8",
+      "size": 2976
+    },
+    {
+      "path": "styles.css",
+      "sha256": "261ead3f463890feb14ef6f9296a42817ac5b83982d2b9cc6688261979137f0d",
+      "size": 161876
+    },
+    {
+      "path": "supabase-config.js",
+      "sha256": "3cf452f89ea54a35650a13de407df13ae326b6ba14ac57157dedcb89fd1800c6",
+      "size": 149
+    },
+    {
+      "path": "vendor/html2canvas/LICENSE",
+      "sha256": "86200ce4e92d9a22c41c8647a55f7a5fddff304ff89b4d36ecc699ed8c123d2c",
+      "size": 1061
+    },
+    {
+      "path": "vendor/html2canvas/html2canvas.min.js",
+      "sha256": "e87e550794322e574a1fda0c1549a3c70dae5a93d9113417a429016838eab8cb",
+      "size": 198689
+    },
+    {
+      "path": "vendor/pdfjs/LICENSE",
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "size": 10174
+    },
+    {
+      "path": "vendor/pdfjs/pdf.min.js",
+      "sha256": "5b5799e6f8c680663207ac5b42ee14eed2a406fa7af48f50c154f0c0b1566946",
+      "size": 320004
+    },
+    {
+      "path": "vendor/pdfjs/pdf.worker.min.js",
+      "sha256": "feabdf309770ed24bba31a5467836cdc8cf639c705af27d52b585b041bb8527b",
+      "size": 1087212
+    }
+  ]
+}

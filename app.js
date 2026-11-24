@@ -8,6 +8,7 @@
   const OFFLINE_CACHE_KEY = "shaafici-order-desk-offline-info-v2";
   let appUpdater = null;
   let appUpdateManifest = null;
+  let webAppUpdateManifest = null;
   let appUpdateCheckPromise = null;
   let onlineModeInitialized = false;
   let appUpdateEventsInitialized = false;
@@ -3719,8 +3720,12 @@
       const update = await nativeAppUpdater().checkForUpdates();
       const installedVersionCode = Number(update?.installedVersionCode);
       const latestVersionCode = Number(update?.latestVersionCode);
+      const installedWebVersion = Number(update?.installedWebVersion);
+      const latestWebVersion = Number(update?.latestWebVersion);
       if (!Number.isSafeInteger(installedVersionCode) || installedVersionCode < 1
         || !Number.isSafeInteger(latestVersionCode) || latestVersionCode < 1
+        || !Number.isSafeInteger(installedWebVersion) || installedWebVersion < 0
+        || !Number.isSafeInteger(latestWebVersion) || latestWebVersion < 0
         || typeof update?.latestVersionName !== "string"
         || typeof update?.apkUrl !== "string"
         || typeof update?.sha256 !== "string") {
@@ -3729,6 +3734,7 @@
 
       if (latestVersionCode > installedVersionCode) {
         appUpdateManifest = update;
+        webAppUpdateManifest = null;
         $("#app-update-title").textContent = "Update required";
         $("#app-update-copy").textContent =
           `Version ${update.latestVersionName} must be installed before you can sign in.`;
@@ -3738,12 +3744,30 @@
         return false;
       }
 
+      if (latestWebVersion > installedWebVersion) {
+        if (typeof update.webManifestSha256 !== "string"
+          || !/^[a-f0-9]{64}$/i.test(update.webManifestSha256)) {
+          throw new Error("The website update information is invalid.");
+        }
+        appUpdateManifest = null;
+        webAppUpdateManifest = update;
+        $("#app-update-title").textContent = "Website update available";
+        $("#app-update-copy").textContent =
+          `Website version ${latestWebVersion} is ready. Update the app content before signing in.`;
+        button.textContent = "Update website";
+        button.disabled = false;
+        appUpdateStatus("Tap Update website to download the latest website changes.");
+        return false;
+      }
+
       appUpdateManifest = null;
+      webAppUpdateManifest = null;
       gate.hidden = true;
       return true;
     } catch (error) {
       console.error("Could not verify the required app update.", error);
       appUpdateManifest = null;
+      webAppUpdateManifest = null;
       $("#app-update-title").textContent = "Unable to verify app version";
       $("#app-update-copy").textContent = "Connect to the internet and check again to continue.";
       button.textContent = "Retry update check";
@@ -3756,6 +3780,24 @@
   async function updateAppFromGate() {
     const button = $("#app-update-button");
     if (!appUpdateManifest) {
+      if (webAppUpdateManifest) {
+        const update = webAppUpdateManifest;
+        button.disabled = true;
+        appUpdateStatus("Downloading and verifying the website update.");
+        try {
+          await nativeAppUpdater().installWebUpdate({
+            version: update.latestWebVersion,
+            sha256: update.webManifestSha256
+          });
+          appUpdateStatus("Website updated. Reloading the app.");
+        } catch (error) {
+          console.error("Could not install the website update.", error);
+          button.disabled = false;
+          button.textContent = "Retry website update";
+          appUpdateStatus(error.message || "Could not download the website update.", true);
+        }
+        return;
+      }
       button.disabled = true;
       await checkAppUpdateOnce();
       return;

@@ -3,7 +3,7 @@
   "versionName": "1.4",
   "apkUrl": "https://ahmedgurey07.github.io/transfers/downloads/shaafici-order-desk-v5.apk",
   "sha256": "84cdf092e772b4eec0368d199a7aef4f76cb445f9bf3ac368f727c7305045331",
-  "webVersion": 2,
+  "webVersion": 4,
   "webManifestUrl": "https://ahmedgurey07.github.io/transfers/web-update.json",
-  "webManifestSha256": "ab2585e7ddb96772a5ad5e8d054c9c60cb3a396830871d69cc4b5d36ad72fea5"
+  "webManifestSha256": "57ba291809064e111c9f960ce60b6eb8925a7e5d3088ac3fb8a597f82a8f3330"
 }

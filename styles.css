@@ -2157,6 +2157,16 @@ form .auth-field input::placeholder {
   }
   .table-view-container[data-table-view="table"] .table-scroll td::before { display: none; content: none; }
   #returned-tiles-view .table-view-container[data-table-view="table"] .table-scroll { overflow-x: auto !important; }
+  #returned-tiles-view .table-view-container[data-table-view="table"] .returned-tiles-table {
+    width: max-content;
+    min-width: 100%;
+    table-layout: auto;
+  }
+  #returned-tiles-view .table-view-container[data-table-view="table"] .returned-tiles-table th,
+  #returned-tiles-view .table-view-container[data-table-view="table"] .returned-tiles-table td {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
   #catalog-view .table-view-container[data-table-view="table"] .catalog-table,
   #catalog-view .table-view-container[data-table-view="table"] .catalog-table thead,
   #catalog-view .table-view-container[data-table-view="table"] .catalog-table tbody {
@@ -2374,7 +2384,7 @@ form .auth-field input::placeholder {
     max-height: 65vh;
     overflow-y: auto !important;
   }
-  #catalog-view .table-view-container[data-table-view="cards"] .table-scroll {
+  .table-view-container[data-table-view="cards"] .table-scroll {
     max-height: none;
   }
   .table-view-container[data-table-view="cards"] .table-pagination {

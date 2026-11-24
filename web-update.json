@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "baseUrl": "https://ahmedgurey07.github.io/transfers/web-updates/v2/",
+  "version": 4,
+  "baseUrl": "https://ahmedgurey07.github.io/transfers/web-updates/v4/",
   "files": [
     {
       "path": "app.js",
@@ -9,7 +9,7 @@
     },
     {
       "path": "index.html",
-      "sha256": "16f3c22d9e8d8aae9ebce2e3b2d2741becf319a94ca21ddb3cc706110365b174",
+      "sha256": "dd9d8c8cca867a61cf657280e09aa71645ff47f14a492b35bed2c42ab4bb1547",
       "size": 73377
     },
     {
@@ -24,7 +24,7 @@
     },
     {
       "path": "service-worker.js",
-      "sha256": "822ef10200ecfe9d75ab1fac0a4757bfa5bc1830b9113e21241f57e709e423c9",
+      "sha256": "961c0a9c1b5fdfa6f88eca1cfbd1ef3358c427fe096170067f8dd0d10d2f21db",
       "size": 3088
     },
     {
@@ -79,8 +79,8 @@
     },
     {
       "path": "styles.css",
-      "sha256": "261ead3f463890feb14ef6f9296a42817ac5b83982d2b9cc6688261979137f0d",
-      "size": 161876
+      "sha256": "ee54cc99ebd593f3eb8df5209a40de7411acd68af62c41014669eb6e472e11eb",
+      "size": 162288
     },
     {
       "path": "supabase-config.js",

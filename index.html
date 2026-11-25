@@ -7,12 +7,12 @@
   <link rel="manifest" href="manifest.webmanifest?v=202611232334">
   <link rel="icon" type="image/png" sizes="512x512" href="shaafici-app-icon.png?v=202611232259">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=web-4">
+  <link rel="stylesheet" href="styles.css?v=web-16">
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="vendor/html2canvas/html2canvas.min.js" defer></script>
-  <script src="app.js?v=web-4" defer></script>
+  <script src="app.js?v=web-16" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="app-update-gate" aria-labelledby="app-update-title" hidden>
@@ -255,14 +255,14 @@
             <label class="field"><span>Cartons</span><input id="return-cartons" type="number" min="0" step="any" value="0" required></label>
             <label class="field"><span>FIRI</span><input id="return-firi" type="number" min="0" step="any" value="0" required></label>
             <fieldset class="returned-delivered-details">
-              <legend>Delivered details</legend>
-              <label class="field"><span>Delivered date</span><input id="return-delivered-date" type="date"></label>
-              <label class="field"><span>Delivered driver</span><input id="return-driver" list="returned-tile-drivers" maxlength="120"></label>
+              <legend>Returned details</legend>
+              <label class="field"><span>Returned date</span><input id="return-delivered-date" type="date"></label>
+              <label class="field"><span>Returned driver</span><input id="return-driver" list="returned-tile-drivers" maxlength="120"></label>
             </fieldset>
-            <fieldset class="returned-taken-details">
+            <fieldset class="returned-taken-details" hidden>
               <legend>Taken details</legend>
               <label class="field"><span>Taken by</span><input id="return-returned-by" maxlength="120"></label>
-              <label class="field"><span>Taken date <i>*</i></span><input id="return-date" type="date" required></label>
+              <label class="field"><span>Taken date</span><input id="return-date" type="date"></label>
             </fieldset>
           </div>
           <div class="form-actions"><span class="auth-status" id="returned-tile-status" role="status" aria-live="polite"></span><div><button class="button button-quiet" id="cancel-returned-tile-edit" type="button" hidden>Cancel edit</button><button class="button button-primary" id="save-returned-tile" type="submit">Save return</button></div></div>

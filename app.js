@@ -1440,6 +1440,14 @@
   }
 
   function renderReturnedTiles() {
+    const tableHeaders = $(".returned-tiles-table").tHead.rows[0].cells;
+    tableHeaders[3].textContent = "RETURNED DRIVER";
+    tableHeaders[4].textContent = "RETURNED DATE";
+    const columnFilters = $$(".returned-tiles-column-filters input");
+    columnFilters[3].placeholder = "Search returned driver";
+    columnFilters[3].setAttribute("aria-label", "Search returned driver");
+    columnFilters[4].placeholder = "Search returned date";
+    columnFilters[4].setAttribute("aria-label", "Search returned date");
     renderReturnedTileSuggestions();
     const status = $("#returned-tile-status");
     const unavailable = Boolean(returnedTilesSetupError);
@@ -1533,16 +1541,21 @@
     const entry = returnedTiles.find((candidate) => candidate.id === id);
     if (!entry) return;
     editingReturnedTileId = id;
+    $(".returned-taken-details").hidden = false;
+    const formValue = (value) => {
+      const text = String(value ?? "").trim();
+      return text.toLocaleLowerCase() === "null" ? "" : text;
+    };
     $("#returned-tile-form-title").textContent = "Edit returned tile";
-    $("#return-customer").value = entry.returnedFrom || "";
-    $("#return-product").value = entry.product || "";
-    $("#return-branch").value = normalizeReturnedTileBranch(entry.branch);
-    $("#return-driver").value = normalizeReturnedTileDriver(entry.driver);
+    $("#return-customer").value = formValue(entry.returnedFrom);
+    $("#return-product").value = formValue(entry.product);
+    $("#return-branch").value = formValue(normalizeReturnedTileBranch(entry.branch));
+    $("#return-driver").value = formValue(normalizeReturnedTileDriver(entry.driver));
     $("#return-cartons").value = String(entry.cartons ?? 0);
     $("#return-firi").value = String(entry.firi ?? 0);
-    $("#return-delivered-date").value = entry.deliveredDate || "";
-    $("#return-date").value = entry.returnedDate || "";
-    $("#return-returned-by").value = entry.returnedBy || "";
+    $("#return-delivered-date").value = formValue(returnedTileWorkbookDate(entry.returnedDate));
+    $("#return-date").value = formValue(returnedTileWorkbookDate(entry.deliveredDate));
+    $("#return-returned-by").value = formValue(entry.returnedBy);
     $("#save-returned-tile").textContent = "Save changes";
     $("#cancel-returned-tile-edit").hidden = false;
     $("#returned-tile-status").textContent = "";
@@ -1554,8 +1567,10 @@
   function closeReturnedTileEdit() {
     editingReturnedTileId = "";
     $("#returned-tile-form").reset();
+    $(".returned-taken-details").hidden = true;
     $("#return-cartons").value = "0";
     $("#return-firi").value = "0";
+    $("#return-delivered-date").value = dateValue();
     $("#return-date").value = dateValue();
     $("#returned-tile-form-title").textContent = "Register a returned tile";
     $("#save-returned-tile").textContent = "Save return";
@@ -1617,8 +1632,8 @@
       driver: normalizeReturnedTileDriver($("#return-driver").value),
       cartons,
       firi,
-      deliveredDate: $("#return-delivered-date").value,
-      returnedDate: $("#return-date").value,
+      deliveredDate: $("#return-date").value,
+      returnedDate: $("#return-delivered-date").value,
       returnedBy: $("#return-returned-by").value.trim(),
       recordedBy: existing?.recordedBy || usernameForUser(cloudUser),
       ...(existing ? {
@@ -1702,7 +1717,7 @@
       }
     }
     const text = returnedTileWorkbookCellText(value);
-    const match = text.match(/^(\d{1,2})\s*-\s*(\d{1,2})\s*-\s*(\d{4})$/);
+    const match = text.match(/^(?:[A-Za-z]+,\s*)?(\d{1,2})\s*-\s*(\d{1,2})\s*-\s*(\d{4})$/);
     if (!match) return text;
     const [, dayText, monthText, yearText] = match;
     const day = Number(dayText);
@@ -3785,9 +3800,13 @@
         button.disabled = true;
         appUpdateStatus("Downloading and verifying the website update.");
         try {
+          const websiteVersion = Number(update.latestWebVersion);
+          const manifestSha256 = String(update.webManifestSha256 || "");
           await nativeAppUpdater().installWebUpdate({
-            version: update.latestWebVersion,
-            sha256: update.webManifestSha256
+            version: websiteVersion,
+            sha256: manifestSha256,
+            webVersion: websiteVersion,
+            webManifestSha256: manifestSha256
           });
           appUpdateStatus("Website updated. Reloading the app.");
         } catch (error) {
@@ -7290,7 +7309,7 @@
         });
       });
 
-    returnedTiles.filter((entry) => matchesDate(entry.returnedDate || ""))
+    returnedTiles.filter((entry) => matchesDate(entry.deliveredDate || ""))
       .filter((entry) => !branchQuery || String(entry.branch || "").toLocaleLowerCase().includes(branchQuery))
       .filter((entry) => String(entry.product || "").toLocaleLowerCase().includes(productQuery))
       .forEach((entry) => {
@@ -7299,7 +7318,7 @@
         returnedFiri += Number(entry.firi) || 0;
         rows.push({
           type: "Return",
-          date: entry.returnedDate || "",
+          date: entry.deliveredDate || "",
           reference: entry.id,
           branch: entry.branch || "",
           product: entry.product || "",
@@ -7562,14 +7581,14 @@
     const returnedTileEntries = returnedTiles
       .filter((entry) => matchesItemHistoryProduct(entry.product))
       .map((entry) => {
-        const dateTime = /^\d{4}-\d{2}-\d{2}$/.test(entry.returnedDate || "")
-          ? new Date(`${entry.returnedDate}T12:00:00`).getTime()
+        const dateTime = /^\d{4}-\d{2}-\d{2}$/.test(entry.deliveredDate || "")
+          ? new Date(`${entry.deliveredDate}T12:00:00`).getTime()
           : Number(entry.createdAt) || 0;
         const quantity = `${formatCatalogNumber(entry.cartons || 0)} CRT + ${formatCatalogNumber(entry.firi || 0)} FIRI`;
         const receivedEntry = {
           id: entry.id,
           timestamp: dateTime,
-          date: entry.returnedDate,
+          date: entry.deliveredDate,
           product: entry.product,
           reference: `Returned tiles${entry.sourceNo ? ` · ${entry.sourceNo}` : ""}`,
           from: [entry.returnedFrom, entry.branch].filter(Boolean).join(" · ") || "Customer",
@@ -8718,6 +8737,7 @@
     $("#scheduled-report-frequency").value = scheduledReportFrequency;
     renderSavedDrivers();
     $("#order-date").value = dateValue();
+    $("#return-delivered-date").value = dateValue();
     $("#return-date").value = dateValue();
     renderReturnedTiles();
     if (!itemsBody.children.length) createItemRow();

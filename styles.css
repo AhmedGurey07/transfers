@@ -462,6 +462,7 @@ form button { font-size: 12px; }
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); column-gap: 13px; row-gap: 13px; }
 .field { display: grid; gap: 6px; color: #5b665a; font-size: 9.5px; font-weight: 600; }
 .returned-delivered-details, .returned-taken-details { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 11px 12px 12px; border-radius: 8px; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 13px; }
+.returned-taken-details[hidden] { display: none; }
 .returned-delivered-details { border: 1px solid #efd0cc; background: #fff5f3; }
 .returned-delivered-details legend { color: #a53e35; }
 .returned-taken-details { border: 1px solid #cfe2d3; background: #f3f8f3; }

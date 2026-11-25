@@ -1,14 +1,14 @@
-const CACHE_NAME = "shaafici-order-desk-v92";
+const CACHE_NAME = "shaafici-order-desk-v104";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=web-4",
+  "./styles.css?v=web-16",
   "./supabase-config.js",
   "./products.js",
   "./vendor/pdfjs/pdf.min.js",
   "./vendor/pdfjs/pdf.worker.min.js",
   "./vendor/html2canvas/html2canvas.min.js",
-  "./app.js?v=web-4",
+  "./app.js?v=web-16",
   "./manifest.webmanifest?v=202611232334",
   "./shaafici-warehouse-200-logo.png",
   "./shaafici-warehouse-200-logo-dark.png",

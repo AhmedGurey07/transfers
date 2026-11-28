@@ -812,6 +812,14 @@ form button { font-size: 12px; }
 .driver-delivery-filter { display: grid; gap: 4px; color: #899389; font-size: 8px; font-weight: 700; letter-spacing: .55px; }
 .driver-delivery-filter select { min-width: 130px; height: 32px; padding: 0 7px; border: 1px solid #e3e8e1; border-radius: 6px; color: #586458; background: #fff; font: inherit; font-size: 10px; letter-spacing: 0; }
 .driver-delivery-search { width: 100%; margin-bottom: 8px; }
+.driver-delivery-bulk-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin: 0 0 9px; padding: 8px 10px; border: 1px solid #e8ede7; border-radius: 7px; color: #647164; background: #f8faf7; font-size: 9px; }
+.driver-delivery-select-all { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; font-weight: 700; }
+.driver-delivery-select-all input, .driver-delivery-select input { width: 15px; height: 15px; min-height: 0; margin: 0; accent-color: var(--green); }
+.driver-delivery-bulk-controls .button { min-height: 30px; padding: 0 9px; font-size: 9px; }
+.driver-delivery-list-row { display: flex; min-width: 0; align-items: stretch; gap: 6px; }
+.driver-delivery-list-row .driver-delivery-list-item { flex: 1 1 auto; }
+.driver-delivery-select { display: grid; width: 30px; flex: 0 0 30px; place-items: center; border: 1px solid #e8ede7; border-radius: 7px; background: #fff; cursor: pointer; }
+.driver-admin-delivery-button { margin-top: 10px; }
 .driver-delivery-list { display: grid; max-height: 260px; gap: 5px; overflow-y: auto; margin: 0; padding: 0 4px 0 0; list-style: none; }
 .driver-delivery-list-item { display: flex; width: 100%; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 9px; border: 1px solid #e8ede7; border-radius: 7px; color: #445146; background: #fff; text-align: left; cursor: pointer; }
 .driver-delivery-list-item:hover, .driver-delivery-list-item:focus-visible { border-color: #9dc7a8; outline: none; background: #f7fbf7; }
@@ -2566,6 +2574,11 @@ form .auth-field input::placeholder {
     color: var(--ink);
     border-color: var(--line);
     background-color: var(--surface-inset);
+  }
+  html[data-theme="dark"] .search-box input {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
   }
   html[data-theme="dark"] :is(input, select, textarea)::placeholder { color: #85968a; }
   html[data-theme="dark"] :is(.search-box input, .filter-select select, .filter-select input,

@@ -225,6 +225,9 @@
   let profilePreviewUrl = "";
   let editingCatalogIndex = -1;
   let adjustingCatalogIndex = -1;
+  const selectedDriverDeliveryOrderIds = new Set();
+  let visibleAdminDeliverableOrderIds = [];
+  let adminDriverBulkDeliveryInProgress = false;
   let catalogAdjustments = [];
   let catalogUploadBatches = [];
   let selectedCatalogUploadBatchId = "";
@@ -4704,6 +4707,17 @@
     return order.deliveryConfirmationStatus === "approved";
   }
 
+  function canAdminMarkDriverTransferDelivered(order) {
+    return cloudDeployment
+      && !offlineReadOnly
+      && ["owner", "admin"].includes(cloudRole)
+      && !order.deletedAt
+      && Boolean(String(order.driverPhone || order.driver || "").trim())
+      && !["pending", "rejected"].includes(order.approvalStatus)
+      && ["In progress", "Delivered"].includes(normalizeOrderStatus(order.status))
+      && !isDriverDeliveryApproved(order);
+  }
+
   function deliveryProgressLabel(order) {
     if (isDriverDeliveryApproved(order)) return "Delivered";
     if (order.deliveryConfirmationStatus === "pending") return "Awaiting approval";
@@ -4758,6 +4772,33 @@
       .map(({ driver }) => driver);
   }
 
+  function renderAdminDriverDeliveryBulkControls(visibleOrders) {
+    const controls = $("#shaafici-driver-delivery-bulk-controls");
+    const selectAll = $("#shaafici-select-all-deliveries");
+    const count = $("#shaafici-selected-delivery-count");
+    const submit = $("#shaafici-deliver-selected");
+    const canManageDeliveries = cloudDeployment && ["owner", "admin"].includes(cloudRole);
+    controls.hidden = !canManageDeliveries;
+    if (!canManageDeliveries) selectedDriverDeliveryOrderIds.clear();
+
+    visibleAdminDeliverableOrderIds = canManageDeliveries
+      ? visibleOrders.filter(canAdminMarkDriverTransferDelivered).map((order) => order.id)
+      : [];
+    const eligibleIds = new Set(visibleAdminDeliverableOrderIds);
+    selectedDriverDeliveryOrderIds.forEach((orderId) => {
+      if (!eligibleIds.has(orderId)) selectedDriverDeliveryOrderIds.delete(orderId);
+    });
+    const selectedCount = visibleAdminDeliverableOrderIds
+      .filter((orderId) => selectedDriverDeliveryOrderIds.has(orderId)).length;
+    count.textContent = `${selectedCount} selected`;
+    selectAll.disabled = !visibleAdminDeliverableOrderIds.length || adminDriverBulkDeliveryInProgress;
+    selectAll.checked = visibleAdminDeliverableOrderIds.length > 0
+      && selectedCount === visibleAdminDeliverableOrderIds.length;
+    selectAll.indeterminate = selectedCount > 0 && selectedCount < visibleAdminDeliverableOrderIds.length;
+    submit.disabled = selectedCount === 0 || adminDriverBulkDeliveryInProgress;
+    $("#shaafici-admin-mark-delivered").disabled = adminDriverBulkDeliveryInProgress;
+  }
+
   function renderShaaficiDrivers() {
     const options = $("#shaafici-driver-options");
     const optionsEmpty = $("#shaafici-driver-options-empty");
@@ -4809,6 +4850,7 @@
       button.addEventListener("click", () => {
         selectedShaaficiDriverPhone = driver.phone;
         selectedShaaficiOrderIndex = 0;
+        selectedDriverDeliveryOrderIds.clear();
         renderShaaficiDrivers();
       });
       options.append(button);
@@ -4816,9 +4858,11 @@
 
     const selectedDriver = orderedDrivers.find((driver) => driver.phone === selectedShaaficiDriverPhone);
     if (!selectedDriver) {
+      renderAdminDriverDeliveryBulkControls([]);
       $("#shaafici-driver-activity").hidden = true;
       updateDriverDeliverySummary(0, 0, 0, 0);
       $("#shaafici-driver-take").hidden = true;
+      $("#shaafici-admin-mark-delivered").hidden = true;
       $("#shaafici-driver-delivery-form").hidden = true;
       $("#shaafici-delivery-feedback").hidden = true;
       orderDetails.hidden = true;
@@ -4833,12 +4877,14 @@
     $("#shaafici-driver-activity").hidden = false;
     renderDriverAnalytics(driverOrders);
     if (!driverOrders.length) {
+      renderAdminDriverDeliveryBulkControls([]);
       updateDriverDeliverySummary(0, 0, 0, 0);
       $("#shaafici-delivery-counts").textContent = "0 transfers";
       $("#shaafici-driver-delivery-list").replaceChildren();
       $("#shaafici-driver-delivery-list-empty").hidden =
         $("#shaafici-driver-delivery-filter").value === "all";
       $("#shaafici-driver-take").hidden = true;
+      $("#shaafici-admin-mark-delivered").hidden = true;
       $("#shaafici-driver-delivery-form").hidden = true;
       $("#shaafici-delivery-feedback").hidden = true;
       orderDetails.hidden = true;
@@ -4873,12 +4919,33 @@
       ].map((value) => String(value || "")).join(" ").toLocaleLowerCase();
       return !deliverySearchQuery || searchableText.includes(deliverySearchQuery);
     });
+    renderAdminDriverDeliveryBulkControls(visibleOrders.map(({ order }) => order));
     if (visibleOrders.length && !visibleOrders.some(({ index }) => index === selectedShaaficiOrderIndex)) {
       selectedShaaficiOrderIndex = visibleOrders[0].index;
     }
     const deliveryList = $("#shaafici-driver-delivery-list");
     deliveryList.replaceChildren(...visibleOrders.map(({ order: listedOrder, index }) => {
       const item = document.createElement("li");
+      item.className = "driver-delivery-list-row";
+      if (cloudDeployment && ["owner", "admin"].includes(cloudRole)) {
+        const selection = document.createElement("label");
+        selection.className = "driver-delivery-select";
+        selection.title = canAdminMarkDriverTransferDelivered(listedOrder)
+          ? `Select ${listedOrder.id} for delivery`
+          : "This transfer cannot be marked delivered";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = selectedDriverDeliveryOrderIds.has(listedOrder.id);
+        checkbox.disabled = !canAdminMarkDriverTransferDelivered(listedOrder) || adminDriverBulkDeliveryInProgress;
+        checkbox.setAttribute("aria-label", `Select transfer ${listedOrder.id} for delivery`);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) selectedDriverDeliveryOrderIds.add(listedOrder.id);
+          else selectedDriverDeliveryOrderIds.delete(listedOrder.id);
+          renderShaaficiDrivers();
+        });
+        selection.append(checkbox);
+        item.append(selection);
+      }
       const button = document.createElement("button");
       button.type = "button";
       button.className = "driver-delivery-list-item";
@@ -4961,6 +5028,7 @@
       && ["In progress", "Delivered"].includes(orderStatus)
       && order.deliveryConfirmationStatus !== "pending"
       && !isDriverDeliveryApproved(order);
+    $("#shaafici-admin-mark-delivered").hidden = !canAdminMarkDriverTransferDelivered(order);
     $("#shaafici-driver-take").hidden = !isAssignedDriver || orderStatus !== "Pending"
       || order.approvalStatus === "pending";
     deliveryForm.hidden = !canSubmitDelivery;
@@ -5075,6 +5143,93 @@
       button.disabled = false;
     }
   }
+
+  async function adminDeliverDriverTransfers(orderIds) {
+    if (!cloudDeployment || offlineReadOnly || !["owner", "admin"].includes(cloudRole)) {
+      showToast("Only online workspace admins can mark driver transfers delivered.");
+      return;
+    }
+    const uniqueIds = [...new Set(orderIds)];
+    if (!uniqueIds.length) return;
+    if (!window.confirm(`Mark ${uniqueIds.length} selected transfer${uniqueIds.length === 1 ? "" : "s"} as delivered?`)) return;
+
+    adminDriverBulkDeliveryInProgress = true;
+    const status = $("#shaafici-admin-delivery-status");
+    status.hidden = false;
+    status.classList.remove("error");
+    status.textContent = `Marking ${uniqueIds.length} transfer${uniqueIds.length === 1 ? "" : "s"} delivered...`;
+    renderShaaficiDrivers();
+    const updatedById = new Map();
+    const failures = [];
+    for (let offset = 0; offset < uniqueIds.length; offset += 20) {
+      const batch = uniqueIds.slice(offset, offset + 20);
+      try {
+        const result = await invokeWorkflowManagement({
+          action: "admin-deliver-transfers",
+          orderIds: batch
+        });
+        const results = Array.isArray(result?.results) ? result.results : [];
+        const resultById = new Map(results.map((entry) => [entry?.id, entry]));
+        batch.forEach((orderId) => {
+          const entry = resultById.get(orderId);
+          if (entry?.order && entry.order.id === orderId) {
+            updatedById.set(orderId, entry.order);
+          } else {
+            failures.push(`${orderId}: ${entry?.error || "No update result returned."}`);
+          }
+        });
+      } catch (error) {
+        console.error("Could not mark selected driver transfers delivered.", error);
+        batch.forEach((orderId) => failures.push(`${orderId}: ${error.message || "Update failed."}`));
+      }
+    }
+
+    if (updatedById.size) {
+      orders = loadOrders(orders.map((order) => updatedById.get(order.id) || order));
+      updatedById.forEach((_, orderId) => selectedDriverDeliveryOrderIds.delete(orderId));
+      try {
+        localStorage.setItem(workspaceLocalStorageKey(STORAGE_KEY), JSON.stringify(orders));
+      } catch (error) {
+        console.warn("Could not keep a local backup of the admin delivery updates.", error);
+      }
+      try {
+        await saveOfflineSnapshot();
+      } catch (error) {
+        console.warn("Could not save an offline snapshot of the admin delivery updates.", error);
+      }
+    }
+    renderSavedDrivers();
+    renderAllOrders();
+    renderOverview();
+    adminDriverBulkDeliveryInProgress = false;
+    renderShaaficiDrivers();
+
+    const deliveredCount = updatedById.size;
+    status.hidden = false;
+    status.classList.toggle("error", failures.length > 0);
+    status.textContent = failures.length
+      ? `Marked ${deliveredCount} delivered; ${failures.length} failed: ${failures.join(" | ")}`
+      : `Marked ${deliveredCount} transfer${deliveredCount === 1 ? "" : "s"} delivered.`;
+    showToast(failures.length
+      ? `${deliveredCount} delivered; ${failures.length} could not be updated.`
+      : `${deliveredCount} transfer${deliveredCount === 1 ? "" : "s"} marked delivered.`);
+  }
+
+  function markSelectedDriverTransfersDelivered() {
+    adminDeliverDriverTransfers([...selectedDriverDeliveryOrderIds]
+      .filter((orderId) => visibleAdminDeliverableOrderIds.includes(orderId)));
+  }
+
+  function markCurrentDriverTransferDelivered() {
+    const driver = drivers.find((entry) => entry.phone === selectedShaaficiDriverPhone);
+    const order = driver && getOrdersForDriver(driver, getDriverDateRange())[selectedShaaficiOrderIndex];
+    if (!order || !canAdminMarkDriverTransferDelivered(order)) {
+      showToast("This transfer cannot be marked delivered.");
+      return;
+    }
+    adminDeliverDriverTransfers([order.id]);
+  }
+
   function renderSavedDrivers() {
     $("#drivers-status").textContent = drivers.length
       ? `${drivers.length} ${drivers.length === 1 ? "driver" : "drivers"} saved`
@@ -8751,6 +8906,16 @@
   $("#shaafici-driver-period").addEventListener("change", renderShaaficiDrivers);
   $("#shaafici-driver-date").addEventListener("change", renderShaaficiDrivers);
   $("#shaafici-driver-delivery-filter").addEventListener("change", renderShaaficiDrivers);
+  $("#shaafici-select-all-deliveries").addEventListener("change", (event) => {
+    if (event.currentTarget.checked) {
+      visibleAdminDeliverableOrderIds.forEach((orderId) => selectedDriverDeliveryOrderIds.add(orderId));
+    } else {
+      visibleAdminDeliverableOrderIds.forEach((orderId) => selectedDriverDeliveryOrderIds.delete(orderId));
+    }
+    renderShaaficiDrivers();
+  });
+  $("#shaafici-deliver-selected").addEventListener("click", markSelectedDriverTransfersDelivered);
+  $("#shaafici-admin-mark-delivered").addEventListener("click", markCurrentDriverTransferDelivered);
   $$(".driver-delivery-summary [data-driver-delivery-filter]").forEach((card) => {
     card.addEventListener("click", () => {
       $("#shaafici-driver-delivery-filter").value = card.dataset.driverDeliveryFilter;

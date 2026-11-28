@@ -7,12 +7,12 @@
   <link rel="manifest" href="manifest.webmanifest?v=202611232334">
   <link rel="icon" type="image/png" sizes="512x512" href="shaafici-app-icon.png?v=202611232259">
   <title>SHAAFICI — Order Desk</title>
-  <link rel="stylesheet" href="styles.css?v=web-18">
+  <link rel="stylesheet" href="styles.css?v=web-21">
   <script src="supabase-config.js"></script>
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="vendor/html2canvas/html2canvas.min.js" defer></script>
-  <script src="app.js?v=web-25" defer></script>
+  <script src="app.js?v=web-31" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="app-update-gate" aria-labelledby="app-update-title" hidden>
@@ -185,12 +185,24 @@
 
       <section class="view" id="orders-view" aria-labelledby="orders-title">
         <div class="page-heading"><div><p class="eyebrow">YOUR BUSINESS RECORDS</p><h1 id="orders-title">All orders</h1><p class="welcome-copy">Review, update, and print your saved orders.</p></div><button class="button button-primary" type="button" data-action="new-order"><span class="button-plus">＋</span> Create new order</button></div>
-        <div class="filter-bar order-filters"><label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search customer, product, driver, or order" aria-label="Search orders"></label><label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="In progress">In progress</option><option value="Delivered">Delivered</option><option value="Cancelled">Cancelled</option><option value="__overdue__">Overdue</option></select></label><label class="filter-select"><span class="sr-only">Filter by branch</span><input id="order-branch-filter" type="search" placeholder="Branch"></label><label class="filter-select"><span class="sr-only">Filter by driver</span><input id="order-driver-filter" type="search" placeholder="Driver"></label><label class="filter-select"><span class="sr-only">Order date from</span><input id="order-date-from-filter" type="date"></label><label class="filter-select"><span class="sr-only">Order date to</span><input id="order-date-to-filter" type="date"></label></div>
+        <div class="filter-bar order-filters">
+          <label class="search-box"><span>⌕</span><input id="order-search" type="search" placeholder="Search order, customer, product, driver, or note" aria-label="Search orders"></label>
+          <label class="filter-select"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All statuses</option><option value="Pending">Pending</option><option value="In progress">In progress</option><option value="Delivered">Delivered</option><option value="Cancelled">Cancelled</option><option value="__overdue__">Overdue</option></select></label>
+          <label class="filter-select"><span class="sr-only">Filter by branch</span><input id="order-branch-filter" type="search" placeholder="Branch"></label>
+          <label class="filter-select"><span class="sr-only">Filter by driver</span><input id="order-driver-filter" type="search" placeholder="Driver"></label>
+          <label class="filter-select order-date-filter-field"><span>DATE</span><input id="order-date-filter" type="date" aria-label="Show orders for a specific date" title="Show orders for one date"></label>
+          <label class="filter-select order-date-filter-field"><span>FROM</span><input id="order-date-from-filter" type="date" aria-label="Show orders from this date"></label>
+          <label class="filter-select order-date-filter-field"><span>TO</span><input id="order-date-to-filter" type="date" aria-label="Show orders through this date"></label>
+          <button class="button button-secondary order-date-reset" id="clear-order-date-filters" type="button" aria-label="Clear date filters">All dates</button>
+        </div>
         <section class="panel location-review-panel" id="unassigned-orders-panel" hidden>
           <div class="panel-heading"><div><h2>Orders needing location review</h2><p>These existing orders did not match a known branch during migration. Assign each one before staff can access it.</p></div></div>
           <div class="table-scroll"><table><thead><tr><th>ORDER</th><th>CUSTOMER</th><th>BRANCH</th><th>DATE</th><th>ASSIGN LOCATION</th></tr></thead><tbody id="unassigned-orders"></tbody></table></div>
-          <div class="empty-state" id="unassigned-orders-empty" hidden><strong>No orders need review</strong></div>
           <p class="auth-status" id="unassigned-orders-status" role="status" aria-live="polite"></p>
+        </section>
+        <section class="panel driver-notes-panel" id="driver-notes-panel" hidden>
+          <div class="panel-heading"><div><h2>Orders with driver notes</h2><p>Driver delivery notes are listed separately from the full order list.</p></div><span class="item-count"><span id="driver-note-order-count">0</span> orders</span></div>
+          <div class="table-card"><div class="table-scroll"><table><thead><tr><th>ORDER</th><th>CUSTOMER</th><th>DRIVER</th><th>DATE</th><th>DRIVER NOTE</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="driver-notes-orders"></tbody></table></div><div class="empty-state" id="driver-notes-empty"><span class="empty-icon">✎</span><strong>No orders with driver notes</strong><span>Orders with notes from drivers will appear here.</span></div></div>
         </section>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th data-order-sort="id">ORDER</th><th data-order-sort="customer">CUSTOMER</th><th data-order-sort="transferId">TRANSFER ID</th><th data-order-sort="date">DATE</th><th data-order-sort="status">STATUS</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="all-orders"></tbody></table></div><div class="empty-state" id="orders-empty"><span class="empty-icon">⌕</span><strong>No matching orders</strong><span>Try changing your search or create a new order.</span></div></div>
         <section class="panel approval-panel" id="approvals-panel">

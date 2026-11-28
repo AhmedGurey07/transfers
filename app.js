@@ -3346,10 +3346,9 @@
     const body = $("#unassigned-orders");
     if (!panel || !body) return;
     const canReview = cloudDeployment && cloudRole === "owner";
-    panel.hidden = !canReview;
+    panel.hidden = !canReview || unassignedOrders.length === 0;
     body.replaceChildren();
-    $("#unassigned-orders-empty").hidden = !canReview || unassignedOrders.length > 0;
-    if (!canReview) return;
+    if (!canReview || !unassignedOrders.length) return;
     unassignedOrders.forEach((order) => {
       const row = document.createElement("tr");
       [order.id, order.customer || "—", order.branch || "—", order.date || "—"].forEach((value) => {
@@ -6311,6 +6310,9 @@
   function getTileConverter(product, qtyItem) {
     const value = Number(qtyItem);
     if (!Number.isFinite(value) || value <= 0) return null;
+    if (/\bstaircase\b/i.test(String(product))) {
+      return { label: "Staircase", falakad: 96, cartoon: 2, firi: 1 };
+    }
     const matches = Object.entries(converters).filter(([, converter]) =>
       Math.abs(converter.falakad - value) < 0.005
     );
@@ -7227,11 +7229,6 @@
       && ["pending", "approved", "rejected"].includes(order.deliveryConfirmationStatus)
       ? `<small class="delivery-recipient-detail">Recipient: ${escapeAttribute(order.deliveredTo || "—")} · ${escapeAttribute(order.deliveredToPhone || "—")}</small>`
       : "";
-    const deliveryNoteNotice = ["owner", "admin"].includes(cloudRole)
-      && ["pending", "approved", "rejected"].includes(order.deliveryConfirmationStatus)
-      && order.deliveryNote
-      ? `<small class="delivery-recipient-detail">Delivery note: ${escapeAttribute(order.deliveryNote)}</small>`
-      : "";
     const approvalNotice = order.approvalStatus === "pending"
       ? "Awaiting order approval"
       : order.deliveryConfirmationStatus === "pending"
@@ -7248,8 +7245,8 @@
       <td><span class="order-number">${escapeAttribute(order.id)}</span>${order.priority ? '<span class="order-priority-badge">PRIORITY</span>' : ""}</td>
       <td class="customer-cell">${escapeAttribute(order.customer)}${overdue ? '<small class="overdue-label">OVERDUE</small>' : ""}</td>
       <td>${escapeAttribute(order.transferId || "—")}</td>
-      <td>${formatDate(order.date)}</td>
-      <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button>${approvalNotice ? `<small class="approval-state">${escapeAttribute(approvalNotice)}</small>` : ""}${deliveryRecipientNotice}${deliveryNoteNotice}</td>
+      <td>${formatDate(orderDateKey(order))}</td>
+      <td><button class="status-pill status-${statusClass(status)}" type="button" aria-label="Change status for ${escapeAttribute(order.id)}" title="Click to change status">${escapeAttribute(status)}</button>${approvalNotice ? `<small class="approval-state">${escapeAttribute(approvalNotice)}</small>` : ""}${deliveryRecipientNotice}</td>
       <td class="row-actions"><button class="icon-button" type="button" aria-label="Open order ${escapeAttribute(order.id)}" title="Open order">↗</button><button class="order-action-button" type="button" data-action="history" aria-label="View history for ${escapeAttribute(order.id)}">History</button><button class="order-action-button order-delete-button" type="button" data-action="delete" aria-label="Delete order ${escapeAttribute(order.id)}">Delete</button></td>`;
     row.addEventListener("click", (event) => {
       if (event.target.closest("button, a, input, select, textarea")) return;
@@ -7265,6 +7262,32 @@
     $(".status-pill", row).addEventListener("click", () => changeStatus(order.id));
     $('[data-action="history"]', row).addEventListener("click", () => showOrderHistory(order.id));
     $('[data-action="delete"]', row).addEventListener("click", () => deleteOrder(order.id));
+    return row;
+  }
+
+  function driverNoteOrderRow(order) {
+    const row = document.createElement("tr");
+    row.className = "clickable-order-row";
+    row.tabIndex = 0;
+    row.setAttribute("aria-label", `Open order ${order.id}`);
+    row.innerHTML = `
+      <td><span class="order-number">${escapeAttribute(order.id)}</span></td>
+      <td class="customer-cell">${escapeAttribute(order.customer)}</td>
+      <td>${escapeAttribute(order.driver || "—")}</td>
+      <td>${formatDate(orderDateKey(order))}</td>
+      <td class="driver-note-content">${escapeAttribute(String(order.deliveryNote || "").trim())}</td>
+      <td class="row-actions"><button class="icon-button" type="button" aria-label="Open order ${escapeAttribute(order.id)}" title="Open order">↗</button></td>`;
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("button, a, input, select, textarea")) return;
+      editOrder(order.id);
+    });
+    row.addEventListener("keydown", (event) => {
+      if ((event.key === "Enter" || event.key === " ") && event.target === row) {
+        event.preventDefault();
+        editOrder(order.id);
+      }
+    });
+    $(".icon-button", row).addEventListener("click", () => editOrder(order.id));
     return row;
   }
 
@@ -7284,6 +7307,40 @@
         : String(first).localeCompare(String(second), undefined, { numeric: true, sensitivity: "base" });
       return (orderSort.direction === "asc" ? 1 : -1) * (comparison || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
     });
+  }
+
+  function orderDateKey(order) {
+    const savedDate = String(order.date || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(savedDate)) return savedDate;
+    const createdAt = Number(order.createdAt) || 0;
+    return createdAt ? dateValue(new Date(createdAt)) : "";
+  }
+
+  function countOrdersForSelectedDates(orderList = orders) {
+    const exactDate = $("#order-date-filter").value;
+    const from = $("#order-date-from-filter").value;
+    const to = $("#order-date-to-filter").value;
+    return orderList.filter((order) => {
+      if (order.deletedAt) return false;
+      const date = orderDateKey(order);
+      return (!exactDate || date === exactDate)
+        && (!from || date >= from)
+        && (!to || date <= to);
+    }).length;
+  }
+
+  function clearOrderDateFilters() {
+    $("#order-date-filter").value = "";
+    $("#order-date-from-filter").value = "";
+    $("#order-date-to-filter").value = "";
+  }
+
+  function clearAllOrderFilters() {
+    $("#order-search").value = "";
+    $("#status-filter").value = "all";
+    $("#order-branch-filter").value = "";
+    $("#order-driver-filter").value = "";
+    clearOrderDateFilters();
   }
 
   function updateOrderSortHeaders() {
@@ -7391,7 +7448,7 @@
     $("#stat-low-stock").textContent = String(productCatalog.filter(isCatalogLowStock).length);
     $("#stat-ended-products").textContent = String(productCatalog.filter(isCatalogEnded).length);
     $("#stat-critical-stock").textContent = String(productCatalog.filter(isCatalogCritical).length);
-    $("#nav-order-count").textContent = String(activeOrders.length);
+    $("#nav-order-count").textContent = String(countOrdersForSelectedDates(activeOrders));
     const target = $("#recent-orders");
     target.replaceChildren(...sorted.slice(0, 5).map(orderRow));
     labelTableRows(target);
@@ -7532,18 +7589,89 @@
     const status = $("#status-filter").value;
     const branch = $("#order-branch-filter").value.trim().toLocaleLowerCase();
     const driver = $("#order-driver-filter").value.trim().toLocaleLowerCase();
+    const canReviewDeliveryDetails = ["owner", "admin"].includes(cloudRole);
+    $("#driver-notes-panel").hidden = !canReviewDeliveryDetails;
+    $("#order-search").placeholder = canReviewDeliveryDetails
+      ? "Search order, customer, product, driver, or note"
+      : "Search order, customer, product, or driver";
+    const exactDate = $("#order-date-filter").value;
     const from = $("#order-date-from-filter").value;
     const to = $("#order-date-to-filter").value;
-    const filtered = sortOrders(orders.filter((order) => !order.deletedAt)).filter((order) =>
-      (status === "all" || (status === "__overdue__" ? isOrderOverdue(order) : normalizeOrderStatus(order.status) === status)) &&
-      (!from || (order.date || "") >= from) &&
-      (!to || (order.date || "") <= to) &&
-      (!branch || String(order.branch || "").toLocaleLowerCase().includes(branch)) &&
-      (!driver || String(order.driver || "").toLocaleLowerCase().includes(driver)) &&
-      `${order.id} ${order.customer} ${order.transferId || ""} ${order.category} ${order.branch || ""} ${order.driver || ""} ${(order.items || []).map((item) => item.product).join(" ")}`.toLocaleLowerCase().includes(query)
-    );
+    $("#nav-order-count").textContent = String(countOrdersForSelectedDates());
+    const filtered = orders.filter((order) => {
+      if (order.deletedAt) return false;
+      const orderDate = orderDateKey(order);
+      return (status === "all" || (status === "__overdue__" ? isOrderOverdue(order) : normalizeOrderStatus(order.status) === status))
+        && (!exactDate || orderDate === exactDate)
+        && (!from || orderDate >= from)
+        && (!to || orderDate <= to)
+        && (!branch || String(order.branch || "").toLocaleLowerCase().includes(branch))
+        && (!driver || String(order.driver || "").toLocaleLowerCase().includes(driver))
+        && [
+          order.id, order.customer, order.transferId, order.category, order.branch, order.driver,
+          ...(canReviewDeliveryDetails ? [order.deliveredTo, order.deliveredToPhone, order.deliveryNote] : []),
+          ...(order.items || []).map((item) => item.product)
+        ].map((value) => String(value || "")).join(" ").toLocaleLowerCase().includes(query);
+    });
+    const driverNoteOrders = canReviewDeliveryDetails
+      ? filtered.filter((order) => String(order.deliveryNote || "").trim())
+      : [];
+    const driverNotesTarget = $("#driver-notes-orders");
+    driverNotesTarget.replaceChildren(...sortOrders(driverNoteOrders).map(driverNoteOrderRow));
+    $("#driver-note-order-count").textContent = String(driverNoteOrders.length);
+    $("#driver-notes-empty").hidden = driverNoteOrders.length > 0;
+    labelTableRows(driverNotesTarget);
     const target = $("#all-orders");
-    target.replaceChildren(...filtered.map(orderRow));
+    const ordersByDate = new Map();
+    filtered.forEach((order) => {
+      const date = orderDateKey(order);
+      if (!ordersByDate.has(date)) ordersByDate.set(date, []);
+      ordersByDate.get(date).push(order);
+    });
+    const dateKeys = [...ordersByDate.keys()].sort((left, right) => {
+      if (!left) return 1;
+      if (!right) return -1;
+      return right.localeCompare(left);
+    });
+    const rows = [];
+    dateKeys.forEach((date) => {
+      const dateOrders = sortOrders(ordersByDate.get(date));
+      const groupRow = document.createElement("tr");
+      groupRow.className = "order-day-group-row";
+      const groupCell = document.createElement("td");
+      groupCell.className = "order-day-group-cell";
+      groupCell.colSpan = 6;
+      const groupContent = document.createElement("div");
+      groupContent.className = "order-day-group-content";
+      if (date) {
+        const dateButton = document.createElement("button");
+        dateButton.type = "button";
+        dateButton.className = "order-day-group-filter";
+        dateButton.textContent = formatDate(date);
+        dateButton.title = `Show only orders from ${formatDate(date)}`;
+        dateButton.setAttribute("aria-label", `Show only orders from ${formatDate(date)}`);
+        dateButton.setAttribute("aria-pressed", String(exactDate === date));
+        dateButton.addEventListener("click", () => {
+          $("#order-date-filter").value = date;
+          $("#order-date-from-filter").value = "";
+          $("#order-date-to-filter").value = "";
+          renderAllOrders();
+        });
+        groupContent.append(dateButton);
+      } else {
+        const undatedLabel = document.createElement("strong");
+        undatedLabel.textContent = "Date not recorded";
+        groupContent.append(undatedLabel);
+      }
+      const groupCount = document.createElement("span");
+      groupCount.className = "order-day-group-count";
+      groupCount.textContent = `${dateOrders.length} ${dateOrders.length === 1 ? "order" : "orders"}`;
+      groupContent.append(groupCount);
+      groupCell.append(groupContent);
+      groupRow.append(groupCell);
+      rows.push(groupRow, ...dateOrders.map(orderRow));
+    });
+    target.replaceChildren(...rows);
     labelTableRows(target);
     $("#orders-empty").hidden = filtered.length > 0;
     updateOrderSortHeaders();
@@ -8772,6 +8900,12 @@
   });
   $$("[data-view]").forEach((link) => link.addEventListener("click", (event) => {
     event.preventDefault();
+    if (link.dataset.view === "orders") {
+      if (!setView("orders")) return;
+      clearAllOrderFilters();
+      renderAllOrders();
+      return;
+    }
     setView(link.dataset.view);
   }));
   $$("[data-overview-stat]").forEach((card) => card.addEventListener("click", () => {
@@ -8804,8 +8938,7 @@
     $("#order-search").value = "";
     $("#order-branch-filter").value = "";
     $("#order-driver-filter").value = "";
-    $("#order-date-from-filter").value = "";
-    $("#order-date-to-filter").value = "";
+    clearOrderDateFilters();
     renderAllOrders();
   }));
   $("#catalog-overview-filter-clear").addEventListener("click", () => {
@@ -9166,10 +9299,27 @@
   ["quantities", "taken", "qty-items"].forEach((field) => {
     $(`#catalog-edit-${field}`).addEventListener("input", updateCatalogDerivedFields);
   });
-  ["order-search", "order-branch-filter", "order-driver-filter", "order-date-from-filter", "order-date-to-filter"]
+  ["order-search", "order-branch-filter", "order-driver-filter"]
     .forEach((id) => $(`#${id}`).addEventListener("input", renderAllOrders));
-  ["status-filter", "order-date-from-filter", "order-date-to-filter"]
-    .forEach((id) => $(`#${id}`).addEventListener("change", renderAllOrders));
+  $("#status-filter").addEventListener("change", renderAllOrders);
+  ["order-date-filter", "order-date-from-filter", "order-date-to-filter"].forEach((id) => {
+    const input = $(`#${id}`);
+    const filterOrdersByDate = () => {
+      if (id === "order-date-filter" && input.value) {
+        $("#order-date-from-filter").value = "";
+        $("#order-date-to-filter").value = "";
+      } else if (id !== "order-date-filter" && input.value) {
+        $("#order-date-filter").value = "";
+      }
+      renderAllOrders();
+    };
+    input.addEventListener("input", filterOrdersByDate);
+    input.addEventListener("change", filterOrdersByDate);
+  });
+  $("#clear-order-date-filters").addEventListener("click", () => {
+    clearOrderDateFilters();
+    renderAllOrders();
+  });
   $("#catalog-search").addEventListener("input", scheduleCatalogSearchRender);
   $("#catalog-page-first").addEventListener("click", () => {
     catalogPage = 1;

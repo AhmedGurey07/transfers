@@ -1095,12 +1095,30 @@ form .auth-field input::placeholder {
 .low-stock-row { background: #fff3e7 !important; box-shadow: inset 3px 0 #e7a14a; }
 .order-filters { flex-wrap: wrap; align-items: center; }
 .order-filters .filter-select input[type="search"] { width: 125px; }
+.order-date-filter-field { gap: 5px; padding-left: 9px; }
+.order-date-filter-field > span:not(.sr-only) { color: #899389; font-size: 8px; font-weight: 800; letter-spacing: .45px; }
+.order-date-filter-field input[type="date"] { min-width: 132px; padding-left: 3px; }
+.order-date-reset { min-height: 36px; padding: 0 10px; font-size: 9px; }
 .order-filters .filter-select span input[type="checkbox"] { margin-right: 5px; }
+.table-card tbody tr.order-day-group-row { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.table-card tbody tr.order-day-group-row:hover { background: transparent; }
+.table-card tbody tr.order-day-group-row td.order-day-group-cell { padding: 8px 12px; border: 1px solid #e5ece5; border-radius: 8px; background: #f2f7f3; }
+.order-day-group-cell::before { display: none !important; content: none !important; }
+.order-day-group-content { display: flex; align-items: center; gap: 10px; }
+.order-day-group-filter { border: 0; padding: 0; color: #315d3e; background: transparent; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+.order-day-group-filter:hover, .order-day-group-filter:focus-visible { color: var(--green); text-decoration: underline; }
+.order-day-group-filter[aria-pressed="true"] { color: var(--green); }
+.order-day-group-count { color: #768276; font-size: 9px; }
+@media (max-width: 620px) {
+  .table-card tbody tr.order-day-group-row { display: block; }
+  .table-card tbody tr.order-day-group-row td.order-day-group-cell { display: block; }
+}
 .order-overdue-row { background: #fff7f5; }
 .overdue-label, .approval-state, .delivery-recipient-detail { display: block; margin-top: 4px; font-size: 9px; }
 .overdue-label, .approval-state { color: #a53e35; font-weight: 700; }
 .approval-state { color: #a56a13; }
 .delivery-recipient-detail { color: #586458; overflow-wrap: anywhere; }
+.driver-note-content { min-width: 220px; white-space: normal !important; overflow-wrap: anywhere; }
 .order-priority-field > span { display: flex; align-items: center; gap: 8px; color: #586458; font-size: 10px; font-weight: 700; }
 .order-priority-field input { width: auto; margin: 0; accent-color: #bf8423; }
 .order-priority-field small { margin-left: 22px; color: #7e897e; font-size: 9px; }
@@ -2588,6 +2606,10 @@ form .auth-field input::placeholder {
   html[data-theme="dark"] .table-card th { color: var(--muted); background: var(--surface-raised); }
   html[data-theme="dark"] .table-card td { color: var(--ink-soft); border-bottom-color: #2a3a2f; }
   html[data-theme="dark"] .table-card tbody tr:hover { background: #223329; }
+  html[data-theme="dark"] .table-card tbody tr.order-day-group-row:hover { background: transparent; }
+  html[data-theme="dark"] .table-card tbody tr.order-day-group-row td.order-day-group-cell { border-color: #304136; background: #1b2a20; }
+  html[data-theme="dark"] .order-day-group-filter { color: #b4d6bb; }
+  html[data-theme="dark"] .order-day-group-count { color: var(--muted); }
   html[data-theme="dark"] .catalog-table thead { background: var(--surface-raised); }
   html[data-theme="dark"] #catalog-view .catalog-table th:nth-child(n) {
     color: #c2d4c7;

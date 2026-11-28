@@ -12,7 +12,7 @@
   <script src="products.js" defer></script>
   <script src="vendor/pdfjs/pdf.min.js" defer></script>
   <script src="vendor/html2canvas/html2canvas.min.js" defer></script>
-  <script src="app.js?v=web-19" defer></script>
+  <script src="app.js?v=web-24" defer></script>
 </head>
 <body>
   <section class="auth-gate" id="app-update-gate" aria-labelledby="app-update-title" hidden>
@@ -86,6 +86,7 @@
         <a class="nav-link" href="#reports" data-view="reports"><span class="nav-icon">▥</span> Reports</a>
         <a class="nav-link" href="#transfer-history" data-view="transfer-history"><span class="nav-icon">↔</span> Transfer history</a>
         <a class="nav-link" href="#item-history" data-view="item-history"><span class="nav-icon">▤</span> Item history</a>
+        <a class="nav-link" href="#product-uploads" data-view="product-uploads"><span class="nav-icon">⇧</span> Excel uploads <span class="nav-count" id="nav-catalog-upload-count" hidden>0</span></a>
         <a class="nav-link" href="#returned-tiles" data-view="returned-tiles"><span class="nav-icon">↩</span> Returned tiles</a>
         <a class="nav-link" href="#new-order" data-view="new-order"><span class="nav-icon">＋</span> Create an order</a>
         <a class="nav-link" href="#drivers" data-view="drivers"><span class="nav-icon">♧</span> Drivers</a>
@@ -318,6 +319,16 @@
         <div class="page-heading"><div><p class="eyebrow">PRODUCT ACTIVITY</p><h1 id="item-history-title">Item history</h1><p class="welcome-copy">Review transfers, returned tiles, quantity adjustments, and catalog edits for each item.</p></div></div>
         <div class="filter-bar"><label class="search-box"><span>⌕</span><input id="item-history-search" type="search" placeholder="Search reference, product, customer, or branch" aria-label="Search item history"></label></div>
         <div class="table-card"><div class="table-scroll"><table><thead><tr><th>DATE / TIME</th><th>REFERENCE</th><th>PRODUCT</th><th>FROM</th><th>TO</th><th>QUANTITY / CHANGE</th><th>UNIT</th><th>CHANGED BY</th></tr></thead><tbody id="item-history"></tbody></table></div><div class="empty-state" id="item-history-empty"><span class="empty-icon">▤</span><strong>No item history yet</strong><span>Saved transfer items will appear here.</span></div></div>
+      </section>
+
+      <section class="view" id="product-uploads-view" aria-labelledby="product-uploads-title">
+        <div class="page-heading">
+          <div><p class="eyebrow">CATALOG IMPORTS</p><h1 id="product-uploads-title">Excel upload history</h1><p class="welcome-copy">Review every product line from each successful Excel upload, including the quantity added to stock.</p></div>
+          <div class="catalog-upload-actions"><span class="item-count" id="catalog-upload-count">0 uploads</span><button class="button button-secondary" id="catalog-upload-print-selected" type="button" disabled>Print selected upload</button><button class="button button-secondary" id="catalog-upload-print-all" type="button" disabled>Print all uploads</button></div>
+        </div>
+        <div class="filter-bar"><label class="field catalog-upload-select-field"><span>Select upload</span><select id="catalog-upload-batch-select" disabled></select></label><span class="history-filter-label" id="catalog-upload-batch-summary"></span></div>
+        <div class="table-card"><div class="table-scroll"><table><thead><tr><th>PRODUCT</th><th>QTY IN FILE</th><th>QTY ADDED</th><th>Q/ITEM</th><th>UNIT</th><th>RESULT</th></tr></thead><tbody id="catalog-upload-items"></tbody></table></div><div class="empty-state" id="catalog-upload-empty"><span class="empty-icon">⇧</span><strong>No Excel uploads yet</strong><span>Successful product uploads for this location will appear here.</span></div></div>
+        <section id="catalog-upload-print-view" hidden aria-hidden="true"></section>
       </section>
 
       <section class="view" id="users-view" aria-labelledby="users-title">

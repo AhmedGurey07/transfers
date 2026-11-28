@@ -146,6 +146,7 @@
     }]));
   let productCatalog = window.AHMED_GUREY_PRODUCTS;
   let catalogStockFilter = "all";
+  let catalogUploadResultNames = null;
   let scheduledReportFrequency = "off";
   if (!Array.isArray(productCatalog)) throw new Error("The warehouse product catalog did not load.");
   function cleanPdfText(value) {
@@ -225,6 +226,8 @@
   let editingCatalogIndex = -1;
   let adjustingCatalogIndex = -1;
   let catalogAdjustments = [];
+  let catalogUploadBatches = [];
+  let selectedCatalogUploadBatchId = "";
   let catalogEditHistory = [];
   let catalogApprovals = [];
   let returnedTiles = [];
@@ -361,6 +364,7 @@
     const filtered = [];
     for (const item of productCatalog) {
       if (query && !catalogSearchText.get(item).includes(query)) continue;
+      if (catalogUploadResultNames && !catalogUploadResultNames.has(item.product.toLocaleLowerCase())) continue;
       if (!matchesCatalogStockFilter(item)) continue;
       const matchesFilters = catalogFilterFields.every(([field]) => {
         const selected = catalogValueFilters[field];
@@ -664,8 +668,11 @@
     $("#catalog-title").textContent = stockFilter.title;
     $("#catalog-view .page-heading .welcome-copy").textContent = stockFilter.description;
     $("#breadcrumb-current").textContent = stockFilter.title;
-    $("#catalog-overview-filter").hidden = catalogStockFilter === "all";
-    if (catalogStockFilter !== "all") {
+    $("#catalog-overview-filter").hidden = catalogStockFilter === "all" && !catalogUploadResultNames;
+    if (catalogUploadResultNames) {
+      $("#catalog-overview-filter-label").textContent =
+        `Showing ${catalogUploadResultNames.size.toLocaleString("en")} products from the latest upload`;
+    } else if (catalogStockFilter !== "all") {
       $("#catalog-overview-filter-label").textContent = stockFilter.filterLabel;
     }
     $("#catalog-empty").hidden = filtered.length > 0;
@@ -2096,6 +2103,7 @@
   function applySyncedSourceData(data) {
     validateSyncedSourceData(data);
     productCatalog = data.products;
+    if (Array.isArray(data.uploads)) catalogUploadBatches = data.uploads;
     if (["off", "daily", "weekly"].includes(data.scheduledReportFrequency)) {
       scheduledReportFrequency = data.scheduledReportFrequency;
     }
@@ -2120,13 +2128,17 @@
     });
     renderProductCatalogOptions();
     renderCatalogFilterOptions();
+    updateCatalogUploadCount();
     updateConverter();
     refreshPreview();
   }
 
   function clearCatalogForLocation() {
     productCatalog = [];
+    catalogUploadResultNames = null;
     catalogAdjustments = [];
+    catalogUploadBatches = [];
+    selectedCatalogUploadBatchId = "";
     catalogEditHistory = [];
     catalogApprovals = [];
     scheduledReportFrequency = "off";
@@ -2143,6 +2155,7 @@
     $("#scheduled-report-frequency").value = scheduledReportFrequency;
     window.AHMED_GUREY_PRODUCTS = productCatalog;
     indexProductCatalog();
+    updateCatalogUploadCount();
     renderProductCatalogOptions();
     renderCatalogFilterOptions();
     renderProductCatalogTable();
@@ -2165,6 +2178,7 @@
       converters,
       gypsumConverters,
       adjustments: catalogAdjustments,
+      uploads: catalogUploadBatches,
       catalogEditHistory,
       catalogApprovals,
       lowStockThreshold: LOW_STOCK_MAX_UOM_N,
@@ -2198,7 +2212,10 @@
     });
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.error || "Could not update the Excel workbook.");
-    applySyncedSourceData(result.data);
+    applySyncedSourceData({
+      ...result.data,
+      uploads: Array.isArray(data.uploads) ? data.uploads : catalogUploadBatches
+    });
     lastSyncedVersion = result.data.version;
     setSyncStatus(`Excel workbook updated · ${result.data.products.length.toLocaleString("en")} products.`);
     return true;
@@ -2331,7 +2348,7 @@
         taken: takenText,
         rQuantity: remainder,
         uomN,
-        unit: text(value("unit")) || "PCS",
+        unit: text(value("unit")),
         status: text(value("statuses"))
       });
     }
@@ -2364,7 +2381,8 @@
       addUnique("rQuantities", row.rQuantity);
       addUnique("uomNs", row.uomN);
       addUnique("statuses", row.status);
-      if (!entry.unit || entry.unit === "PCS" && row.unit !== "PCS") entry.unit = row.unit;
+      const sourceUnit = row.unit || "PCS";
+      if (!entry.unit || entry.unit === "PCS" && sourceUnit !== "PCS") entry.unit = sourceUnit;
       entry.quantity = entry.quantities[0] || "";
       catalogByProduct.set(product.toLocaleLowerCase(), entry);
     }
@@ -2376,7 +2394,11 @@
     let added = 0;
     let updated = 0;
     let codeAttached = 0;
+    let existingUnitsKept = 0;
     const codeOnlyItems = new Set();
+    const affectedProducts = new Set();
+    const uploadHistoryEntries = [];
+    const uploadLines = [];
     for (const row of rows) {
       const quantityText = String(row.quantity || "").replaceAll(",", "");
       const incomingQuantity = quantityText ? Number(quantityText) : NaN;
@@ -2434,13 +2456,23 @@
         const existingUnit = String(item.unit || "").trim();
         const incomingUnit = String(row.unit || "").trim();
         if (existingUnit && incomingUnit && existingUnit.toLocaleLowerCase() !== incomingUnit.toLocaleLowerCase()) {
-          throw new Error(`"${row.product}" uses ${incomingUnit}, but the matching catalog product uses ${existingUnit}.`);
+          if (codeMatches.includes(item)) existingUnitsKept += 1;
+          else throw new Error(`"${row.product}" uses ${incomingUnit}, but the matching catalog product uses ${existingUnit}.`);
         }
       }
+      affectedProducts.add(item);
       if (attachCodeToExistingProduct) {
         item.product = row.product;
         codeOnlyItems.add(item);
         codeAttached += 1;
+        uploadLines.push({
+          product: item.product,
+          uploadedQuantity: incomingQuantity,
+          quantityAdded: 0,
+          qtyItem,
+          unit: item.unit || row.unit || "PCS",
+          result: "Code attached; stock unchanged"
+        });
         continue;
       }
       if (codeOnlyItems.has(item)) continue;
@@ -2468,10 +2500,45 @@
       if (qtyItem) item.qtyItems[index] = qtyItem;
       if (isNewQuantity) item.taken[index] = String(incomingTaken);
       item.unit = item.unit || row.unit || "PCS";
-      if (attachCodeToExistingProduct) item.product = row.product;
       recalculateCatalogProduct(item);
+      uploadLines.push({
+        product: item.product,
+        uploadedQuantity: incomingQuantity,
+        quantityAdded: incomingQuantity,
+        qtyItem,
+        unit: item.unit || "—",
+        result: incomingQuantity > 0 ? "Added to stock" : "No stock change"
+      });
+      if (incomingQuantity > 0) {
+        const timestamp = Date.now();
+        const variantReference = qtyItem ? ` · Q/ITEM ${qtyItem}` : "";
+        uploadHistoryEntries.push({
+          id: `${timestamp}-${Math.random().toString(36).slice(2)}`,
+          timestamp,
+          date: dateValue(new Date(timestamp)),
+          product: item.product,
+          amount: incomingQuantity,
+          previousQuantity,
+          updatedQuantity: previousQuantity + incomingQuantity,
+          actor: usernameForUser(cloudUser),
+          actorEmail: String(cloudUser.email || "").trim(),
+          reason: `Excel upload${variantReference}`,
+          reference: `Excel upload${variantReference}`,
+          fromLocation: "Excel upload",
+          toLocation: "WH2/Warehouse 200k",
+          unit: item.unit || "—"
+        });
+      }
     }
-    return { added, updated, codeAttached };
+    return {
+      added,
+      updated,
+      codeAttached,
+      existingUnitsKept,
+      products: [...affectedProducts],
+      historyEntries: uploadHistoryEntries,
+      uploadLines
+    };
   }
 
   async function uploadCatalogProducts(file) {
@@ -2501,6 +2568,9 @@
       uomNs: [...(item.uomNs || [])],
       statuses: [...(item.statuses || [])]
     }));
+    const previousCatalogAdjustments = catalogAdjustments;
+    const previousCatalogUploadBatches = catalogUploadBatches;
+    const previousSelectedCatalogUploadBatchId = selectedCatalogUploadBatchId;
     const uploadButton = $("#catalog-upload-products");
     uploadButton.disabled = true;
     status.textContent = "Reading and merging products…";
@@ -2508,15 +2578,45 @@
     try {
       const rows = await readCatalogWorkbookRows(file);
       const result = mergeCatalogProductRows(rows);
+      const timestamp = Date.now();
+      const uploadBatch = {
+        id: `${timestamp}-${Math.random().toString(36).slice(2)}`,
+        timestamp,
+        date: dateValue(new Date(timestamp)),
+        fileName: file.name || "Uploaded workbook",
+        uploadedBy: usernameForUser(cloudUser),
+        items: result.uploadLines
+      };
+      catalogUploadBatches = [uploadBatch, ...catalogUploadBatches];
+      selectedCatalogUploadBatchId = uploadBatch.id;
+      catalogAdjustments = [...catalogAdjustments, ...result.historyEntries];
+      const uploadedProductNames = new Set(result.products.map((item) => item.product.toLocaleLowerCase()));
       await saveCatalogToCloud(currentCatalogData());
+      catalogUploadResultNames = uploadedProductNames;
+      updateCatalogUploadCount();
+      catalogStockFilter = "all";
+      $("#catalog-search").value = "";
+      Object.keys(catalogValueFilters).forEach((key) => delete catalogValueFilters[key]);
+      renderCatalogFilterPanel();
+      closeCatalogEdit();
       indexProductCatalog();
       renderProductCatalogOptions();
       renderItemHistory();
+      setView("product-uploads", { confirmUnsaved: false });
       refreshPreview();
-      status.textContent = `${result.added} added · ${result.updated} quantities increased · ${result.codeAttached} codes attached.`;
-      showToast(`Products uploaded: ${result.added} added, ${result.updated} quantities increased, ${result.codeAttached} codes attached.`);
+      const unitNote = result.existingUnitsKept
+        ? ` Kept the catalog UOM for ${result.existingUnitsKept} matching product${result.existingUnitsKept === 1 ? "" : "s"}.`
+        : "";
+      showToast(`Products uploaded: ${result.added} added, ${result.updated} quantities increased, ${result.codeAttached} codes attached.${unitNote}`);
+      window.requestAnimationFrame(() => {
+        $(".catalog-table-card").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     } catch (error) {
       productCatalog = previousCatalog;
+      catalogAdjustments = previousCatalogAdjustments;
+      catalogUploadBatches = previousCatalogUploadBatches;
+      selectedCatalogUploadBatchId = previousSelectedCatalogUploadBatchId;
+      updateCatalogUploadCount();
       window.AHMED_GUREY_PRODUCTS = productCatalog;
       indexProductCatalog();
       renderProductCatalogOptions();
@@ -5607,7 +5707,7 @@
     $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${name}-view`));
     $$("[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === name));
     $("#app-back-button").hidden = name === "overview";
-    const labels = { overview: "Overview", orders: "All orders", catalog: "Product catalog", history: "User activity log", notifications: "Notifications", reports: "Reports", "transfer-history": "Transfer history", "item-history": "Item history", "returned-tiles": "Returned tiles", drivers: "Drivers", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
+    const labels = { overview: "Overview", orders: "All orders", catalog: "Product catalog", history: "User activity log", notifications: "Notifications", reports: "Reports", "transfer-history": "Transfer history", "item-history": "Item history", "product-uploads": "Excel upload history", "returned-tiles": "Returned tiles", drivers: "Drivers", users: "Users", profile: "Your profile", "new-order": editingId ? "Edit order" : "Create an order", "print-preview": "Print preview" };
     $("#breadcrumb-current").textContent = labels[name] || "Overview";
     if (name === "orders") renderAllOrders();
     if (name === "history") renderHistory();
@@ -5616,6 +5716,7 @@
     if (name === "catalog") renderProductCatalogTable();
     if (name === "transfer-history") renderTransferHistory();
     if (name === "item-history") renderItemHistory();
+    if (name === "product-uploads") renderCatalogUploadHistory();
     if (name === "returned-tiles") renderReturnedTiles();
     if (name === "drivers") {
       renderDriverDirectory();
@@ -7700,6 +7801,148 @@
     $("#transfer-history-empty").hidden = entries.length > 0;
   }
 
+  function updateCatalogUploadCount() {
+    const count = catalogUploadBatches.length;
+    const badge = $("#nav-catalog-upload-count");
+    badge.textContent = String(count);
+    badge.hidden = count === 0;
+  }
+
+  function renderCatalogUploadHistory() {
+    const batches = [...catalogUploadBatches].sort((left, right) =>
+      Number(right.timestamp) - Number(left.timestamp)
+    );
+    const select = $("#catalog-upload-batch-select");
+    const countLabel = $("#catalog-upload-count");
+    const summary = $("#catalog-upload-batch-summary");
+    const body = $("#catalog-upload-items");
+    const empty = $("#catalog-upload-empty");
+    const printSelected = $("#catalog-upload-print-selected");
+    const printAll = $("#catalog-upload-print-all");
+
+    updateCatalogUploadCount();
+    countLabel.textContent = `${batches.length} upload${batches.length === 1 ? "" : "s"}`;
+    select.replaceChildren(...batches.map((batch) => {
+      const option = document.createElement("option");
+      option.value = String(batch.id || "");
+      const uploadedAt = Number(batch.timestamp);
+      const date = Number.isFinite(uploadedAt)
+        ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(uploadedAt)
+        : "Unknown date";
+      option.textContent = `${date} · ${batch.fileName || "Uploaded workbook"}`;
+      return option;
+    }));
+
+    const selected = batches.find((batch) => batch.id === selectedCatalogUploadBatchId) || batches[0];
+    if (!selected) {
+      selectedCatalogUploadBatchId = "";
+      select.disabled = true;
+      summary.textContent = "No Excel uploads have been recorded for this location.";
+      body.replaceChildren();
+      empty.hidden = false;
+      printSelected.disabled = true;
+      printAll.disabled = true;
+      return;
+    }
+
+    selectedCatalogUploadBatchId = String(selected.id || "");
+    select.value = selectedCatalogUploadBatchId;
+    select.disabled = false;
+    const items = Array.isArray(selected.items) ? selected.items : [];
+    const totalAdded = items.reduce((total, item) => total + (Number(item.quantityAdded) || 0), 0);
+    summary.textContent = `${selected.fileName || "Uploaded workbook"} · ${items.length} item lines · ${formatCatalogNumber(totalAdded)} added to stock · Uploaded by ${selected.uploadedBy || "—"}`;
+    empty.hidden = items.length > 0;
+    printSelected.disabled = false;
+    printAll.disabled = false;
+    body.replaceChildren(...items.map((item) => {
+      const row = document.createElement("tr");
+      [
+        item.product || "—",
+        formatCatalogNumber(item.uploadedQuantity),
+        formatCatalogNumber(item.quantityAdded),
+        item.qtyItem || "—",
+        item.unit || "—",
+        item.result || "—"
+      ].forEach((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      });
+      return row;
+    }));
+    labelTableRows($("#catalog-upload-items"));
+  }
+
+  function printCatalogUploadHistory(allBatches) {
+    const batches = [...catalogUploadBatches]
+      .filter((batch) => allBatches || batch.id === selectedCatalogUploadBatchId)
+      .sort((left, right) => Number(right.timestamp) - Number(left.timestamp));
+    if (!batches.length) {
+      showToast("There are no Excel uploads to print.");
+      return;
+    }
+    const printView = $("#catalog-upload-print-view");
+    const title = document.createElement("h1");
+    title.textContent = "Excel product upload history";
+    const total = document.createElement("p");
+    total.textContent = `Total uploads: ${batches.length}`;
+    const content = [title, total];
+    batches.forEach((batch) => {
+      const heading = document.createElement("h2");
+      heading.textContent = batch.fileName || "Uploaded workbook";
+      const timestamp = Number(batch.timestamp);
+      const metadata = document.createElement("p");
+      metadata.textContent = `${Number.isFinite(timestamp)
+        ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(timestamp)
+        : "Unknown date"} · Uploaded by ${batch.uploadedBy || "—"}`;
+      const table = document.createElement("table");
+      table.className = "catalog-upload-print-table";
+      const head = document.createElement("thead");
+      const headerRow = document.createElement("tr");
+      ["PRODUCT", "QTY IN FILE", "QTY ADDED", "Q/ITEM", "UNIT", "RESULT"].forEach((label) => {
+        const cell = document.createElement("th");
+        cell.textContent = label;
+        headerRow.append(cell);
+      });
+      head.append(headerRow);
+      const body = document.createElement("tbody");
+      (Array.isArray(batch.items) ? batch.items : []).forEach((item) => {
+        const row = document.createElement("tr");
+        [
+          item.product || "—",
+          formatCatalogNumber(item.uploadedQuantity),
+          formatCatalogNumber(item.quantityAdded),
+          item.qtyItem || "—",
+          item.unit || "—",
+          item.result || "—"
+        ].forEach((value) => {
+          const cell = document.createElement("td");
+          cell.textContent = value;
+          row.append(cell);
+        });
+        body.append(row);
+      });
+      table.append(head, body);
+      content.push(heading, metadata, table);
+    });
+    printView.replaceChildren(...content);
+    printView.hidden = false;
+    document.body.classList.add("printing-catalog-uploads");
+    const cleanup = () => {
+      window.removeEventListener("afterprint", cleanup);
+      document.body.classList.remove("printing-catalog-uploads");
+      printView.hidden = true;
+    };
+    window.addEventListener("afterprint", cleanup);
+    try {
+      window.print();
+    } catch (error) {
+      cleanup();
+      console.error("Could not print Excel upload history.", error);
+      showToast("Could not open the print dialog.");
+    }
+  }
+
   function renderItemHistory() {
     const query = $("#item-history-search").value.trim().toLowerCase();
     const selectedCatalogProduct = getCatalogProduct(itemHistoryProductFilter || query);
@@ -8380,6 +8623,7 @@
     const target = card.dataset.overviewStat;
     if (["total-items", "low-stock", "ended-products", "critical-stock"].includes(target)) {
       if (!setView("catalog")) return;
+      catalogUploadResultNames = null;
       catalogStockFilter = target === "total-items"
         ? "all"
         : target === "ended-products"
@@ -8411,6 +8655,7 @@
   }));
   $("#catalog-overview-filter-clear").addEventListener("click", () => {
     catalogStockFilter = "all";
+    catalogUploadResultNames = null;
     renderProductCatalogTable();
   });
   $("#history-search").addEventListener("input", renderHistory);
@@ -8435,6 +8680,12 @@
     itemHistoryProductFilter = "";
     renderItemHistory();
   });
+  $("#catalog-upload-batch-select").addEventListener("change", (event) => {
+    selectedCatalogUploadBatchId = event.target.value;
+    renderCatalogUploadHistory();
+  });
+  $("#catalog-upload-print-selected").addEventListener("click", () => printCatalogUploadHistory(false));
+  $("#catalog-upload-print-all").addEventListener("click", () => printCatalogUploadHistory(true));
   $("#history-show-all").addEventListener("click", () => {
     historyOrderFilter = "";
     $("#history-search").value = "";
@@ -8838,6 +9089,7 @@
       return;
     }
     const previousLocationId = activeLocationId;
+    catalogUploadResultNames = null;
     $("#workspace-location-select").disabled = true;
     activeLocationId = locationId;
     localStorage.setItem(ACTIVE_LOCATION_KEY, activeLocationId);

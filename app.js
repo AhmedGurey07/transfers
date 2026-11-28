@@ -167,6 +167,18 @@
       || text.match(/^\s*((?:[a-z]\s*)?\d+(?:\s*[/-]\s*[a-z0-9]+)*)\b/i);
     return match?.[1].replace(/\s+/g, "").toLocaleLowerCase() || "";
   }
+  function catalogProductNameWithoutCode(value) {
+    const text = String(value || "").trim();
+    const bracketCode = text.match(/^\s*\[[^\]]+\]\s*/);
+    if (bracketCode && extractCatalogCode(bracketCode[0])) {
+      return text.slice(bracketCode[0].length).replace(/^[-:|]+\s*/, "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+    }
+    const leadingCode = text.match(/^\s*((?:[a-z]\s*)?\d+(?:\s*[/-]\s*[a-z0-9]+)*)[\s:|]+/i);
+    if (leadingCode && extractCatalogCode(leadingCode[1])) {
+      return text.slice(leadingCode[0].length).replace(/\s+/g, " ").trim().toLocaleLowerCase();
+    }
+    return text.replace(/\s+/g, " ").toLocaleLowerCase();
+  }
   function getCatalogCodeFamily(code) {
     return String(code || "").replace(/\/\d+$/, "").toLocaleLowerCase();
   }
@@ -2363,6 +2375,8 @@
   function mergeCatalogProductRows(rows) {
     let added = 0;
     let updated = 0;
+    let codeAttached = 0;
+    const codeOnlyItems = new Set();
     for (const row of rows) {
       const quantityText = String(row.quantity || "").replaceAll(",", "");
       const incomingQuantity = quantityText ? Number(quantityText) : NaN;
@@ -2375,24 +2389,34 @@
         throw new Error(`"${row.product}" has an invalid or negative taken quantity.`);
       }
       const code = extractCatalogCode(row.product);
-      const productName = row.product.toLocaleLowerCase();
-      const matches = productCatalog.filter((item) => code
-        ? extractCatalogCode(item.product) === code
-        : item.product.toLocaleLowerCase() === productName);
+      const productName = catalogProductNameWithoutCode(row.product);
+      const codeMatches = code
+        ? productCatalog.filter((item) => extractCatalogCode(item.product) === code)
+        : [];
+      const uncodedNameMatches = productCatalog.filter((item) =>
+        (!code || !extractCatalogCode(item.product))
+        && catalogProductNameWithoutCode(item.product) === productName
+      );
+      const matches = codeMatches.length ? codeMatches : uncodedNameMatches;
+      const attachCodeToExistingProduct = Boolean(code && !codeMatches.length && uncodedNameMatches.length);
       const qtyItem = String(row.qtyItem || "").trim();
       const qtyItemMatches = qtyItem
         ? matches.filter((item) => (item.qtyItems || []).some((value) => sameCatalogQtyItem(value, qtyItem)))
         : [];
-      const sameNameMatches = matches.filter((item) => item.product.toLocaleLowerCase() === productName);
+      const sameNameMatches = matches.filter((item) =>
+        catalogProductNameWithoutCode(item.product) === productName
+      );
       let item = qtyItemMatches.length === 1 ? qtyItemMatches[0]
         : qtyItemMatches.length > 1 && sameNameMatches.length === 1 ? sameNameMatches[0]
           : qtyItemMatches.length > 1 ? null
             : sameNameMatches.length === 1 ? sameNameMatches[0]
               : matches.length === 1 ? matches[0]
                 : null;
-      if (!item && matches.length > 1 && !qtyItem && !sameNameMatches.length) {
-        throw new Error(`More than one catalog product uses code "${code}". Add Q/ITEM to the workbook to identify the right product.`);
+      if (!item && matches.length > 1) {
+        const identity = codeMatches.length ? `code "${code}"` : `product name "${row.product}"`;
+        throw new Error(`More than one catalog product matches ${identity}. Add Q/ITEM to the workbook to identify the right product.`);
       }
+      const isNewProduct = !item;
       if (!item) {
         item = {
           product: row.product,
@@ -2406,14 +2430,21 @@
         };
         productCatalog.push(item);
         added += 1;
-      } else {
+      } else if (!attachCodeToExistingProduct && !codeOnlyItems.has(item)) {
         const existingUnit = String(item.unit || "").trim();
         const incomingUnit = String(row.unit || "").trim();
         if (existingUnit && incomingUnit && existingUnit.toLocaleLowerCase() !== incomingUnit.toLocaleLowerCase()) {
           throw new Error(`"${row.product}" uses ${incomingUnit}, but the matching catalog product uses ${existingUnit}.`);
         }
-        updated += 1;
       }
+      if (attachCodeToExistingProduct) {
+        item.product = row.product;
+        codeOnlyItems.add(item);
+        codeAttached += 1;
+        continue;
+      }
+      if (codeOnlyItems.has(item)) continue;
+      if (!isNewProduct) updated += 1;
 
       item.quantities = Array.isArray(item.quantities) ? [...item.quantities] : [];
       item.qtyItems = Array.isArray(item.qtyItems) ? [...item.qtyItems] : [];
@@ -2437,9 +2468,10 @@
       if (qtyItem) item.qtyItems[index] = qtyItem;
       if (isNewQuantity) item.taken[index] = String(incomingTaken);
       item.unit = item.unit || row.unit || "PCS";
+      if (attachCodeToExistingProduct) item.product = row.product;
       recalculateCatalogProduct(item);
     }
-    return { added, updated };
+    return { added, updated, codeAttached };
   }
 
   async function uploadCatalogProducts(file) {
@@ -2481,8 +2513,8 @@
       renderProductCatalogOptions();
       renderItemHistory();
       refreshPreview();
-      status.textContent = `${result.added} added · ${result.updated} existing quantities increased.`;
-      showToast(`Products uploaded: ${result.added} added, ${result.updated} quantities increased.`);
+      status.textContent = `${result.added} added · ${result.updated} quantities increased · ${result.codeAttached} codes attached.`;
+      showToast(`Products uploaded: ${result.added} added, ${result.updated} quantities increased, ${result.codeAttached} codes attached.`);
     } catch (error) {
       productCatalog = previousCatalog;
       window.AHMED_GUREY_PRODUCTS = productCatalog;

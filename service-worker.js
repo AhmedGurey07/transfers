@@ -1,4 +1,4 @@
-const CACHE_NAME = "shaafici-order-desk-v104";
+const CACHE_NAME = "shaafici-order-desk-v105";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -8,7 +8,7 @@ const APP_SHELL = [
   "./vendor/pdfjs/pdf.min.js",
   "./vendor/pdfjs/pdf.worker.min.js",
   "./vendor/html2canvas/html2canvas.min.js",
-  "./app.js?v=web-16",
+  "./app.js?v=web-17",
   "./manifest.webmanifest?v=202611232334",
   "./shaafici-warehouse-200-logo.png",
   "./shaafici-warehouse-200-logo-dark.png",

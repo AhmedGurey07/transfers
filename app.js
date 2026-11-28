@@ -1101,6 +1101,7 @@
     const item = productCatalog[index];
     if (!item) return;
     editingCatalogIndex = index;
+    $("#catalog-upload-products").hidden = true;
     $("#catalog-edit-title").textContent = "Edit catalog product";
     $("#catalog-edit-product").value = item.product;
     $("#catalog-edit-quantities").value = (item.quantities || []).map(formatCatalogNumber).join(", ");
@@ -1118,6 +1119,7 @@
 
   function beginCatalogAdd() {
     editingCatalogIndex = -1;
+    $("#catalog-upload-products").hidden = false;
     $("#catalog-edit-title").textContent = "Add catalog product";
     $("#catalog-edit-product").value = "";
     $("#catalog-edit-quantities").value = "";
@@ -1135,6 +1137,7 @@
 
   function closeCatalogEdit() {
     editingCatalogIndex = -1;
+    $("#catalog-upload-products").hidden = true;
     $("#catalog-edit-form").hidden = true;
     $("#catalog-edit-status").textContent = "";
     $("#catalog-edit-title").textContent = "Edit catalog product";
@@ -2248,7 +2251,7 @@
     showToast(`${rows.length.toLocaleString("en")} filtered products exported to Excel.`);
   }
 
-  async function readCatalogWorkbook(file) {
+  async function readCatalogWorkbookRows(file) {
     const xlsx = await loadXlsxLibrary();
     const workbook = xlsx.read(await file.arrayBuffer(), { type: "array", cellDates: true });
     const worksheet = workbook.Sheets.SalesData || workbook.Sheets[workbook.SheetNames[0]];
@@ -2290,7 +2293,7 @@
       return Number.isFinite(parsed) ? parsed : null;
     };
     const format = (value) => Number.isFinite(value) ? String(Number(value.toFixed(2))) : "";
-    const catalogByProduct = new Map();
+    const products = [];
     for (const row of rows.slice(headerRow + 1)) {
       const value = (field) => columns[field] === undefined ? "" : row[columns[field]];
       const product = text(value("product"));
@@ -2309,6 +2312,26 @@
       const uomN = remainderNumber !== null && qtyItem !== null && qtyItem !== 0
         ? format(remainderNumber / qtyItem)
         : text(value("uomNs"));
+      products.push({
+        product,
+        quantity: quantityText,
+        qtyItem: qtyItemText,
+        taken: takenText,
+        rQuantity: remainder,
+        uomN,
+        unit: text(value("unit")) || "PCS",
+        status: text(value("statuses"))
+      });
+    }
+    if (!products.length) throw new Error("No products were found in the catalog worksheet.");
+    return products;
+  }
+
+  async function readCatalogWorkbook(file) {
+    const rows = await readCatalogWorkbookRows(file);
+    const catalogByProduct = new Map();
+    for (const row of rows) {
+      const { product } = row;
       const entry = catalogByProduct.get(product.toLocaleLowerCase()) || {
         product,
         quantity: "",
@@ -2323,20 +2346,155 @@
       const addUnique = (field, item) => {
         if (item && !entry[field].includes(item)) entry[field].push(item);
       };
-      addUnique("quantities", quantityText);
-      addUnique("qtyItems", qtyItemText);
-      addUnique("taken", takenText);
-      addUnique("rQuantities", remainder);
-      addUnique("uomNs", uomN);
-      addUnique("statuses", text(value("statuses")));
-      const sourceUnit = text(value("unit")) || "PCS";
-      if (!entry.unit || entry.unit === "PCS" && sourceUnit !== "PCS") entry.unit = sourceUnit;
+      addUnique("quantities", row.quantity);
+      addUnique("qtyItems", row.qtyItem);
+      addUnique("taken", row.taken);
+      addUnique("rQuantities", row.rQuantity);
+      addUnique("uomNs", row.uomN);
+      addUnique("statuses", row.status);
+      if (!entry.unit || entry.unit === "PCS" && row.unit !== "PCS") entry.unit = row.unit;
       entry.quantity = entry.quantities[0] || "";
       catalogByProduct.set(product.toLocaleLowerCase(), entry);
     }
     const products = [...catalogByProduct.values()];
-    if (!products.length) throw new Error("No products were found in the catalog worksheet.");
     return products;
+  }
+
+  function mergeCatalogProductRows(rows) {
+    let added = 0;
+    let updated = 0;
+    for (const row of rows) {
+      const quantityText = String(row.quantity || "").replaceAll(",", "");
+      const incomingQuantity = quantityText ? Number(quantityText) : NaN;
+      if (!Number.isFinite(incomingQuantity) || incomingQuantity < 0) {
+        throw new Error(`"${row.product}" has an invalid or negative quantity.`);
+      }
+      const takenText = String(row.taken || "").replaceAll(",", "");
+      const incomingTaken = takenText ? Number(takenText) : 0;
+      if (!Number.isFinite(incomingTaken) || incomingTaken < 0) {
+        throw new Error(`"${row.product}" has an invalid or negative taken quantity.`);
+      }
+      const code = extractCatalogCode(row.product);
+      const productName = row.product.toLocaleLowerCase();
+      const matches = productCatalog.filter((item) => code
+        ? extractCatalogCode(item.product) === code
+        : item.product.toLocaleLowerCase() === productName);
+      const qtyItem = String(row.qtyItem || "").trim();
+      const qtyItemMatches = qtyItem
+        ? matches.filter((item) => (item.qtyItems || []).some((value) => sameCatalogQtyItem(value, qtyItem)))
+        : [];
+      const sameNameMatches = matches.filter((item) => item.product.toLocaleLowerCase() === productName);
+      let item = qtyItemMatches.length === 1 ? qtyItemMatches[0]
+        : qtyItemMatches.length > 1 && sameNameMatches.length === 1 ? sameNameMatches[0]
+          : qtyItemMatches.length > 1 ? null
+            : sameNameMatches.length === 1 ? sameNameMatches[0]
+              : matches.length === 1 ? matches[0]
+                : null;
+      if (!item && matches.length > 1 && !qtyItem && !sameNameMatches.length) {
+        throw new Error(`More than one catalog product uses code "${code}". Add Q/ITEM to the workbook to identify the right product.`);
+      }
+      if (!item) {
+        item = {
+          product: row.product,
+          unit: row.unit || "PCS",
+          quantities: [],
+          qtyItems: [],
+          taken: [],
+          rQuantities: [],
+          uomNs: [],
+          statuses: []
+        };
+        productCatalog.push(item);
+        added += 1;
+      } else {
+        const existingUnit = String(item.unit || "").trim();
+        const incomingUnit = String(row.unit || "").trim();
+        if (existingUnit && incomingUnit && existingUnit.toLocaleLowerCase() !== incomingUnit.toLocaleLowerCase()) {
+          throw new Error(`"${row.product}" uses ${incomingUnit}, but the matching catalog product uses ${existingUnit}.`);
+        }
+        updated += 1;
+      }
+
+      item.quantities = Array.isArray(item.quantities) ? [...item.quantities] : [];
+      item.qtyItems = Array.isArray(item.qtyItems) ? [...item.qtyItems] : [];
+      item.taken = Array.isArray(item.taken) ? [...item.taken] : [];
+      const quantityIndex = qtyItem
+        ? item.qtyItems.findIndex((value) => sameCatalogQtyItem(value, qtyItem))
+        : item.quantities.length <= 1 ? 0 : -1;
+      if (quantityIndex < 0 && !qtyItem && item.quantities.length > 1) {
+        throw new Error(`"${row.product}" has multiple Q/ITEM values. Add Q/ITEM to the workbook to identify the quantity to increase.`);
+      }
+      const index = quantityIndex < 0 ? item.quantities.length : quantityIndex;
+      const isNewQuantity = index >= item.quantities.length;
+      while (item.quantities.length <= index) item.quantities.push("0");
+      while (item.qtyItems.length <= index) item.qtyItems.push("");
+      while (item.taken.length <= index) item.taken.push("0");
+      const previousQuantity = Number(item.quantities[index]);
+      if (index < item.quantities.length && !Number.isFinite(previousQuantity)) {
+        throw new Error(`"${row.product}" has an invalid quantity in the existing catalog.`);
+      }
+      item.quantities[index] = formatCatalogNumber(previousQuantity + incomingQuantity);
+      if (qtyItem) item.qtyItems[index] = qtyItem;
+      if (isNewQuantity) item.taken[index] = String(incomingTaken);
+      item.unit = item.unit || row.unit || "PCS";
+      recalculateCatalogProduct(item);
+    }
+    return { added, updated };
+  }
+
+  async function uploadCatalogProducts(file) {
+    const status = $("#catalog-edit-status");
+    if (!file) return;
+    if (offlineReadOnly) {
+      status.textContent = "Offline access is read-only. Reconnect and reload before uploading products.";
+      status.classList.add("error");
+      return;
+    }
+    if (!cloudUser || !supabaseClient || !["owner", "admin"].includes(cloudRole)) {
+      status.textContent = "Sign in as an owner or admin before uploading products.";
+      status.classList.add("error");
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      status.textContent = "Choose an Excel workbook smaller than 25 MB.";
+      status.classList.add("error");
+      return;
+    }
+    const previousCatalog = productCatalog.map((item) => ({
+      ...item,
+      quantities: [...(item.quantities || [])],
+      qtyItems: [...(item.qtyItems || [])],
+      taken: [...(item.taken || [])],
+      rQuantities: [...(item.rQuantities || [])],
+      uomNs: [...(item.uomNs || [])],
+      statuses: [...(item.statuses || [])]
+    }));
+    const uploadButton = $("#catalog-upload-products");
+    uploadButton.disabled = true;
+    status.textContent = "Reading and merging products…";
+    status.classList.remove("error");
+    try {
+      const rows = await readCatalogWorkbookRows(file);
+      const result = mergeCatalogProductRows(rows);
+      await saveCatalogToCloud(currentCatalogData());
+      indexProductCatalog();
+      renderProductCatalogOptions();
+      renderItemHistory();
+      refreshPreview();
+      status.textContent = `${result.added} added · ${result.updated} existing quantities increased.`;
+      showToast(`Products uploaded: ${result.added} added, ${result.updated} quantities increased.`);
+    } catch (error) {
+      productCatalog = previousCatalog;
+      window.AHMED_GUREY_PRODUCTS = productCatalog;
+      indexProductCatalog();
+      renderProductCatalogOptions();
+      console.error("Could not merge uploaded catalog products.", error);
+      status.textContent = error.message || "Could not upload products.";
+      status.classList.add("error");
+    } finally {
+      uploadButton.disabled = false;
+      $("#catalog-products-file").value = "";
+    }
   }
 
   async function uploadWorkbook(file) {
@@ -8528,6 +8686,11 @@
     uploadWorkbook(file);
   });
   $("#add-catalog-product").addEventListener("click", beginCatalogAdd);
+  $("#catalog-upload-products").addEventListener("click", () => $("#catalog-products-file").click());
+  $("#catalog-products-file").addEventListener("change", (event) => {
+    const file = event.target.files[0];
+    uploadCatalogProducts(file);
+  });
   $("#export-catalog").addEventListener("click", exportCatalogToExcel);
   $("#catalog-edit-form").addEventListener("submit", saveCatalogEdit);
   $("#catalog-edit-cancel").addEventListener("click", closeCatalogEdit);
